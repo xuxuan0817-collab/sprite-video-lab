@@ -25,6 +25,10 @@ const STORAGE_KEY = "sprite-video-lab-session-v2";
 const SUPPORTED_VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm"];
 const SUPPORTED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
 const SUPPORTED_UPLOAD_EXTENSIONS = [...SUPPORTED_VIDEO_EXTENSIONS, ...SUPPORTED_IMAGE_EXTENSIONS];
+const AI_RESOLUTION_MIN = 256;
+const AI_RESOLUTION_MAX = 2560;
+const AI_RESOLUTION_STEP = 32;
+const AI_RESOLUTION_DEFAULT = 1024;
 let hotReloadVersion = null;
 let hotReloadTimerId = null;
 let uploadDragDepth = 0;
@@ -42,6 +46,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateSegmentConfirmationUI();
   setStatus("\u7B49\u5F85\u5BFC\u5165\u7D20\u6750\u3002");
   restoreSessionFromStorage();
+  normalizeAiResolutionInput(false);
   startHotReloadPolling();
   window.addEventListener("beforeunload", persistSession);
 });
@@ -186,6 +191,7 @@ function bindEvents() {
   els.matteModeInput.addEventListener("change", updateChromaVisibility);
   els.keyModeInput.addEventListener("change", updateChromaVisibility);
   els.chromaEnabledInput.addEventListener("change", updateChromaVisibility);
+  els.aiResolutionInput.addEventListener("change", normalizeAiResolutionInput);
 
   els.frameGrid.addEventListener("change", (event) => {
     const target = event.target;
@@ -357,6 +363,24 @@ function currentMatteMode() {
   return els.matteModeInput.value || "chroma";
 }
 
+function normalizeAiResolution(value) {
+  const numeric = Number(value);
+  const raw = Number.isFinite(numeric) ? numeric : AI_RESOLUTION_DEFAULT;
+  const clamped = clamp(Math.round(raw), AI_RESOLUTION_MIN, AI_RESOLUTION_MAX);
+  const aligned = Math.floor((clamped + AI_RESOLUTION_STEP / 2) / AI_RESOLUTION_STEP) * AI_RESOLUTION_STEP;
+  return clamp(aligned, AI_RESOLUTION_MIN, AI_RESOLUTION_MAX);
+}
+
+function normalizeAiResolutionInput(shouldPersist = true) {
+  const normalized = normalizeAiResolution(els.aiResolutionInput.value);
+  if (els.aiResolutionInput.value !== String(normalized)) {
+    els.aiResolutionInput.value = String(normalized);
+  }
+  if (shouldPersist) {
+    persistSession();
+  }
+}
+
 function collectFormState() {
   return {
     keep_every: Number(els.keepEveryInput.value || 1),
@@ -372,7 +396,7 @@ function collectFormState() {
     halo_pixels: Number(els.haloInput.value || 0),
     ai_model: els.aiModelInput.value,
     ai_device: els.aiDeviceInput.value,
-    ai_resolution: Number(els.aiResolutionInput.value || 1024),
+    ai_resolution: normalizeAiResolution(els.aiResolutionInput.value),
     luma_black: Number(els.lumaBlackInput.value || 24),
     luma_white: Number(els.lumaWhiteInput.value || 230),
     luma_gamma: Number(els.lumaGammaInput.value || 1),
@@ -409,7 +433,7 @@ function collectProcessingPayload() {
     halo_pixels: Number(els.haloInput.value || 0),
     ai_model: els.aiModelInput.value,
     ai_device: els.aiDeviceInput.value,
-    ai_resolution: Number(els.aiResolutionInput.value || 1024),
+    ai_resolution: normalizeAiResolution(els.aiResolutionInput.value),
     luma_black: Number(els.lumaBlackInput.value || 24),
     luma_white: Number(els.lumaWhiteInput.value || 230),
     luma_gamma: Number(els.lumaGammaInput.value || 1),
@@ -441,7 +465,7 @@ function applyFormState(snapshot) {
   if (snapshot.ai_device && [...els.aiDeviceInput.options].some((option) => option.value === snapshot.ai_device)) {
     els.aiDeviceInput.value = snapshot.ai_device;
   }
-  if (snapshot.ai_resolution != null) els.aiResolutionInput.value = String(snapshot.ai_resolution);
+  if (snapshot.ai_resolution != null) els.aiResolutionInput.value = String(normalizeAiResolution(snapshot.ai_resolution));
   if (snapshot.luma_black != null) els.lumaBlackInput.value = String(snapshot.luma_black);
   if (snapshot.luma_white != null) els.lumaWhiteInput.value = String(snapshot.luma_white);
   if (snapshot.luma_gamma != null) els.lumaGammaInput.value = String(snapshot.luma_gamma);

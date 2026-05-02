@@ -93,6 +93,9 @@ AI_MATTE_DEVICE_ALIASES = {
 }
 DEFAULT_AI_MATTE_MODEL = "birefnet-hr-matting"
 DEFAULT_AI_MATTE_RESOLUTION = 1024
+AI_MATTE_MIN_RESOLUTION = 256
+AI_MATTE_MAX_RESOLUTION = 2560
+AI_MATTE_RESOLUTION_MULTIPLE = 32
 
 _FFMPEG_HWACCELS_CACHE: set[str] | None = None
 _BIREFNET_MODEL_CACHE: dict[tuple[str, str], object] = {}
@@ -210,6 +213,14 @@ def safe_float(value, default: float) -> float:
         return float(value)
     except Exception:
         return default
+
+
+def normalize_ai_resolution(value) -> int:
+    resolution = safe_int(value, DEFAULT_AI_MATTE_RESOLUTION)
+    resolution = max(AI_MATTE_MIN_RESOLUTION, min(AI_MATTE_MAX_RESOLUTION, resolution))
+    half_step = AI_MATTE_RESOLUTION_MULTIPLE // 2
+    aligned = ((resolution + half_step) // AI_MATTE_RESOLUTION_MULTIPLE) * AI_MATTE_RESOLUTION_MULTIPLE
+    return max(AI_MATTE_MIN_RESOLUTION, min(AI_MATTE_MAX_RESOLUTION, aligned))
 
 
 def clamp_float(value: float, minimum: float, maximum: float) -> float:
@@ -870,7 +881,7 @@ def birefnet_alpha_mask(
 ) -> tuple[Image.Image, dict]:
     torch_module, transforms, _auto_model = import_ai_matte_dependencies()
     model, device, normalized_model_key, repo_id = load_birefnet_model(model_key, requested_device)
-    resolution = max(256, min(2560, int(inference_resolution or DEFAULT_AI_MATTE_RESOLUTION)))
+    resolution = normalize_ai_resolution(inference_resolution)
     fitted_image, fitted_box = fit_image_to_square(image, resolution)
     transform = transforms.Compose(
         [
@@ -1569,7 +1580,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     halo_pixels=max(0, safe_int(payload.get("halo_pixels"), 1)),
                     ai_model=normalize_ai_model_key(str(payload.get("ai_model") or DEFAULT_AI_MATTE_MODEL)),
                     ai_device=normalize_ai_device(str(payload.get("ai_device") or "auto")),
-                    ai_resolution=max(256, min(2560, safe_int(payload.get("ai_resolution"), DEFAULT_AI_MATTE_RESOLUTION))),
+                    ai_resolution=normalize_ai_resolution(payload.get("ai_resolution")),
                     luma_black=max(0, min(254, safe_int(payload.get("luma_black"), 24))),
                     luma_white=max(1, min(255, safe_int(payload.get("luma_white"), 230))),
                     luma_gamma=max(0.05, safe_float(payload.get("luma_gamma"), 1.0)),
@@ -1594,7 +1605,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     halo_pixels=max(0, safe_int(payload.get("halo_pixels"), 1)),
                     ai_model=normalize_ai_model_key(str(payload.get("ai_model") or DEFAULT_AI_MATTE_MODEL)),
                     ai_device=normalize_ai_device(str(payload.get("ai_device") or "auto")),
-                    ai_resolution=max(256, min(2560, safe_int(payload.get("ai_resolution"), DEFAULT_AI_MATTE_RESOLUTION))),
+                    ai_resolution=normalize_ai_resolution(payload.get("ai_resolution")),
                     luma_black=max(0, min(254, safe_int(payload.get("luma_black"), 24))),
                     luma_white=max(1, min(255, safe_int(payload.get("luma_white"), 230))),
                     luma_gamma=max(0.05, safe_float(payload.get("luma_gamma"), 1.0)),
