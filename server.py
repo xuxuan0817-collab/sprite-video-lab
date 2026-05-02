@@ -42,6 +42,19 @@ LANCZOS = Image.Resampling.LANCZOS
 APP_VERSION_POLL_MS = 1200
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+CONTENT_TYPE_EXTENSIONS = {
+    "video/mp4": ".mp4",
+    "video/quicktime": ".mov",
+    "video/x-matroska": ".mkv",
+    "video/webm": ".webm",
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/bmp": ".bmp",
+}
+MOJIBAKE_REPLACEMENTS = {
+    "\u677b\ufe40\u75c2": "\u8f66\u5b9d",
+}
 FFMPEG_ACCEL_ENV = "SPRITE_VIDEO_LAB_FFMPEG_ACCEL"
 FFMPEG_ACCEL_PRIORITY = ("cuda", "qsv", "d3d11va", "dxva2")
 FFMPEG_ACCEL_ALIASES = {
@@ -144,6 +157,17 @@ def configure_ai_model_cache() -> Path:
 def clean_filename(name: str) -> str:
     cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "-", Path(name).name).strip(".-")
     return cleaned or "video"
+
+
+def repair_mojibake_text(value: str) -> str:
+    repaired = value
+    for bad, good in MOJIBAKE_REPLACEMENTS.items():
+        repaired = repaired.replace(bad, good)
+    return repaired
+
+
+def repair_mojibake_path(path: Path) -> Path:
+    return Path(repair_mojibake_text(str(path)))
 
 
 def slugify(value: str) -> str:
@@ -516,13 +540,78 @@ def image_info(path: Path) -> dict:
     }
 
 
-def detect_media_type(path: Path) -> str:
+def content_type_extension(content_type: str | None) -> str:
+    normalized = str(content_type or "").split(";", 1)[0].strip().lower()
+    return CONTENT_TYPE_EXTENSIONS.get(normalized, "")
+
+
+def sniff_media_extension(path: Path) -> str:
+    if not path.exists() or not path.is_file():
+        return ""
+    with path.open("rb") as handle:
+        head = handle.read(64)
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return ".mp4"
+    if head.startswith(b"\x1a\x45\xdf\xa3"):
+        return ".webm"
+    if head.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if head.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if head.startswith(b"BM"):
+        return ".bmp"
+    if len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WEBP":
+        return ".webp"
+    return ""
+
+
+def detect_media_type(path: Path, content_type: str | None = None) -> str:
     suffix = path.suffix.lower()
     if suffix in VIDEO_EXTENSIONS:
         return "video"
     if suffix in IMAGE_EXTENSIONS:
         return "image"
-    raise ValueError(f"unsupported media type: {path.suffix}")
+
+    content_extension = content_type_extension(content_type)
+    if content_extension in VIDEO_EXTENSIONS:
+        return "video"
+    if content_extension in IMAGE_EXTENSIONS:
+        return "image"
+
+    sniffed_extension = sniff_media_extension(path)
+    if sniffed_extension in VIDEO_EXTENSIONS:
+        return "video"
+    if sniffed_extension in IMAGE_EXTENSIONS:
+        return "image"
+
+    if path.exists() and path.is_file():
+        try:
+            with Image.open(path):
+                return "image"
+        except Exception:
+            pass
+        try:
+            ffprobe_json(path)
+            return "video"
+        except Exception:
+            pass
+
+    detail = path.suffix or content_type or path.name
+    raise ValueError(f"unsupported media type: {detail}")
+
+
+def preferred_media_extension(path: Path, media_type: str, content_type: str | None = None) -> str:
+    suffix = path.suffix.lower()
+    allowed = VIDEO_EXTENSIONS if media_type == "video" else IMAGE_EXTENSIONS
+    if suffix in allowed:
+        return suffix
+    content_extension = content_type_extension(content_type)
+    if content_extension in allowed:
+        return content_extension
+    sniffed_extension = sniff_media_extension(path)
+    if sniffed_extension in allowed:
+        return sniffed_extension
+    return ".mp4" if media_type == "video" else ".png"
 
 
 def media_info(path: Path, media_type: str | None = None) -> dict:
@@ -555,7 +644,7 @@ def save_upload_manifest(upload_id: str, payload: dict) -> None:
 
 def source_media_entry(upload_id: str) -> tuple[Path, str]:
     manifest = load_upload_manifest(upload_id)
-    path = Path(manifest["source_path"])
+    path = repair_mojibake_path(Path(manifest["source_path"]))
     if not path.exists():
         raise FileNotFoundError(f"source missing: {path}")
     media_type = str(manifest.get("media_type") or detect_media_type(path))
@@ -582,7 +671,7 @@ def build_upload_payload(upload_id: str, source_path: Path, display_name: str, m
 
 
 def register_video_from_path(source_path: Path) -> dict:
-    source_path = source_path.expanduser().resolve()
+    source_path = repair_mojibake_path(source_path).expanduser().resolve()
     if not source_path.exists() or not source_path.is_file():
         raise FileNotFoundError(f"file not found: {source_path}")
     media_type = detect_media_type(source_path)
@@ -600,14 +689,21 @@ def register_video_from_path(source_path: Path) -> dict:
 
 
 def register_uploaded_file(file_item) -> dict:
-    filename = clean_filename(file_item.filename or "video.mp4")
-    media_type = detect_media_type(Path(filename))
+    filename = clean_filename(file_item.filename or "media")
+    content_type = str(getattr(file_item, "type", "") or "")
     upload_id = timestamped_id()
     target_dir = upload_dir(upload_id)
     target_dir.mkdir(parents=True, exist_ok=True)
     target_path = target_dir / filename
     with target_path.open("wb") as handle:
         shutil.copyfileobj(file_item.file, handle)
+    media_type = detect_media_type(target_path, content_type)
+    preferred_extension = preferred_media_extension(target_path, media_type, content_type)
+    if target_path.suffix.lower() not in (VIDEO_EXTENSIONS | IMAGE_EXTENSIONS):
+        renamed_path = target_path.with_name(f"{target_path.name}{preferred_extension}")
+        target_path.rename(renamed_path)
+        target_path = renamed_path
+        filename = target_path.name
     manifest = {
         "upload_id": upload_id,
         "source_path": str(target_path),
@@ -1434,7 +1530,8 @@ class AppHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/api/import-path":
                 payload = self.read_json_body()
-                result = register_video_from_path(Path(str(payload.get("path") or "").strip()))
+                raw_path = str(payload.get("path") or "").strip().strip("\"'")
+                result = register_video_from_path(Path(raw_path))
                 self.send_json({"ok": True, "upload": result})
                 return
             if parsed.path == "/api/upload":
