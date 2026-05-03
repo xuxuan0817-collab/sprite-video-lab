@@ -94,6 +94,8 @@ function bindElements() {
     "softnessInput",
     "despillInput",
     "haloInput",
+    "corridorEnabledInput",
+    "corridorScreenInput",
     "aiModelInput",
     "aiDeviceInput",
     "aiResolutionInput",
@@ -191,6 +193,7 @@ function bindEvents() {
   els.matteModeInput.addEventListener("change", updateChromaVisibility);
   els.keyModeInput.addEventListener("change", updateChromaVisibility);
   els.chromaEnabledInput.addEventListener("change", updateChromaVisibility);
+  els.corridorEnabledInput.addEventListener("change", updateChromaVisibility);
   els.aiResolutionInput.addEventListener("change", normalizeAiResolutionInput);
 
   els.frameGrid.addEventListener("change", (event) => {
@@ -265,6 +268,8 @@ function bindEvents() {
     els.softnessInput,
     els.despillInput,
     els.haloInput,
+    els.corridorEnabledInput,
+    els.corridorScreenInput,
     els.matteModeInput,
     els.aiModelInput,
     els.aiDeviceInput,
@@ -363,6 +368,10 @@ function currentMatteMode() {
   return els.matteModeInput.value || "chroma";
 }
 
+function currentUsesCorridorKey() {
+  return currentMatteMode() !== "none" && els.corridorEnabledInput.checked;
+}
+
 function normalizeAiResolution(value) {
   const numeric = Number(value);
   const raw = Number.isFinite(numeric) ? numeric : AI_RESOLUTION_DEFAULT;
@@ -394,6 +403,8 @@ function collectFormState() {
     softness: Number(els.softnessInput.value === "" ? 1 : els.softnessInput.value),
     despill_strength: Number(els.despillInput.value || 0),
     halo_pixels: Number(els.haloInput.value || 0),
+    corridorkey_enabled: els.corridorEnabledInput.checked,
+    corridorkey_screen: els.corridorScreenInput.value,
     ai_model: els.aiModelInput.value,
     ai_device: els.aiDeviceInput.value,
     ai_resolution: normalizeAiResolution(els.aiResolutionInput.value),
@@ -431,6 +442,8 @@ function collectProcessingPayload() {
     softness: Number(els.softnessInput.value === "" ? 1 : els.softnessInput.value),
     despill_strength: Number(els.despillInput.value || 0),
     halo_pixels: Number(els.haloInput.value || 0),
+    corridorkey_enabled: els.corridorEnabledInput.checked,
+    corridorkey_screen: els.corridorScreenInput.value,
     ai_model: els.aiModelInput.value,
     ai_device: els.aiDeviceInput.value,
     ai_resolution: normalizeAiResolution(els.aiResolutionInput.value),
@@ -459,6 +472,13 @@ function applyFormState(snapshot) {
   if (snapshot.softness != null) els.softnessInput.value = String(snapshot.softness);
   if (snapshot.despill_strength != null) els.despillInput.value = String(snapshot.despill_strength);
   if (snapshot.halo_pixels != null) els.haloInput.value = String(snapshot.halo_pixels);
+  if (snapshot.corridorkey_enabled != null) els.corridorEnabledInput.checked = Boolean(snapshot.corridorkey_enabled);
+  if (
+    snapshot.corridorkey_screen &&
+    [...els.corridorScreenInput.options].some((option) => option.value === snapshot.corridorkey_screen)
+  ) {
+    els.corridorScreenInput.value = snapshot.corridorkey_screen;
+  }
   if (snapshot.ai_model && [...els.aiModelInput.options].some((option) => option.value === snapshot.ai_model)) {
     els.aiModelInput.value = snapshot.ai_model;
   }
@@ -706,22 +726,40 @@ function formatSourceModeLabel(ffmpegAccel, sourceMediaType = uploadMediaType())
 
 function formatMatteModeLabel(matte) {
   const mode = typeof matte === "string" ? matte : (matte?.mode || "chroma");
-  if (mode === "none") return "\u4E0D\u62A0\u56FE";
-  if (mode === "birefnet") return "BiRefNet";
-  if (mode === "birefnet_luma") return "BiRefNet + Luma";
-  return "\u7EAF\u8272\u62A0\u56FE";
+  let label = "\u7EAF\u8272\u62A0\u56FE";
+  if (mode === "none") label = "\u4E0D\u62A0\u56FE";
+  if (mode === "birefnet") label = "BiRefNet";
+  if (mode === "birefnet_luma") label = "BiRefNet + Luma";
+  if (mode !== "none" && typeof matte !== "string" && matte?.corridorkey_enabled) {
+    label = `${label} + CorridorKey`;
+  }
+  return label;
+}
+
+function formatCorridorScreenLabel(value) {
+  if (value === "blue") return "\u84DD\u5E55";
+  if (value === "green") return "\u7EFF\u5E55";
+  return "\u81EA\u52A8";
 }
 
 function formatMatteDetail(matte) {
-  if (!matte || matte.mode === "chroma") {
+  if (!matte) {
     return "";
   }
   if (matte.mode === "none") {
     return "";
   }
-  const parts = [matte.model_label || formatMatteModeLabel(matte)];
+  const parts = [];
+  if (matte.mode !== "chroma") {
+    parts.push(matte.model_label || formatMatteModeLabel(matte));
+  }
   if (matte.resolution) {
     parts.push(`${matte.resolution}px`);
+  }
+  if (matte.corridorkey_enabled) {
+    const screen = formatCorridorScreenLabel(matte.corridorkey_screen_color);
+    const device = matte.corridorkey_device ? ` / ${matte.corridorkey_device}` : "";
+    parts.push(`CorridorKey ${screen}${device}`);
   }
   return parts.join(" / ");
 }
@@ -1049,9 +1087,14 @@ async function processVideo() {
   await withBusy(els.processButton, async () => {
     stopPreviewTimer();
     const matteMode = currentMatteMode();
+    const usesCorridorKey = currentUsesCorridorKey();
     setStatus(
-      matteMode.startsWith("birefnet")
-        ? "正在运行 BiRefNet AI 抠图。首次使用需要准备本地模型。"
+      usesCorridorKey
+        ? matteMode.startsWith("birefnet")
+          ? "\u6B63\u5728\u8FD0\u884C BiRefNet \u548C CorridorKey \u7CBE\u4FEE\u3002"
+          : "\u6B63\u5728\u8FD0\u884C CorridorKey \u7CBE\u4FEE\u3002"
+        : matteMode.startsWith("birefnet")
+        ? "\u6B63\u5728\u8FD0\u884C BiRefNet AI \u62A0\u56FE\u3002"
         : isImageUpload()
         ? "\u6B63\u5728\u5904\u7406\u5355\u5F20\u56FE\u7247\u7684\u900F\u660E\u8FB9\u7F18\u548C\u7F29\u653E..."
         : "\u6b63\u5728\u62bd\u5e27\u5e76\u5904\u7406\u900f\u660e\u8fb9\u7f18\uff0c\u8fd9\u4e00\u6b65\u53ef\u80fd\u9700\u8981\u51e0\u5341\u79d2\u3002"
@@ -1088,9 +1131,14 @@ async function previewCurrentFrame() {
 
   await withBusy(els.previewFrameButton, async () => {
     const matteMode = currentMatteMode();
+    const usesCorridorKey = currentUsesCorridorKey();
     setStatus(
-      matteMode.startsWith("birefnet")
-        ? "正在用 BiRefNet 预览当前帧抠图，首次使用需要准备本地模型..."
+      usesCorridorKey
+        ? matteMode.startsWith("birefnet")
+          ? "\u6B63\u5728\u9884\u89C8 BiRefNet \u548C CorridorKey \u7CBE\u4FEE\u3002"
+          : "\u6B63\u5728\u9884\u89C8 CorridorKey \u7CBE\u4FEE\u3002"
+        : matteMode.startsWith("birefnet")
+        ? "\u6B63\u5728\u7528 BiRefNet \u9884\u89C8\u5F53\u524D\u5E27\u62A0\u56FE\u3002"
         : isImageUpload()
         ? "\u6B63\u5728\u5957\u7528\u53C2\u6570\u9884\u89C8\u5355\u5F20\u56FE\u7247..."
         : "\u6b63\u5728\u62BD\u53D6\u5F53\u524D\u5E27\u5E76\u5957\u7528\u53C2\u6570..."
@@ -1692,7 +1740,9 @@ function updateChromaVisibility() {
   const isChroma = chromaEnabled && matteMode === "chroma";
   const isAi = chromaEnabled && matteMode.startsWith("birefnet");
   const isLuma = chromaEnabled && matteMode === "birefnet_luma";
-  const usesSpillControls = isChroma || isAi;
+  const isCorridorCapable = chromaEnabled;
+  const isCorridor = isCorridorCapable && els.corridorEnabledInput.checked;
+  const usesSpillControls = isChroma || isAi || isCorridor;
   const isManual = els.keyModeInput.value === "manual";
   els.matteModeInput.disabled = !els.chromaEnabledInput.checked;
   els.keyModeInput.closest(".field").style.display = usesSpillControls ? "" : "none";
@@ -1708,6 +1758,12 @@ function updateChromaVisibility() {
   });
   document.querySelectorAll(".luma-matte-only").forEach((node) => {
     node.style.display = isLuma ? "" : "none";
+  });
+  document.querySelectorAll(".corridor-capable-only").forEach((node) => {
+    node.style.display = isCorridorCapable ? "" : "none";
+  });
+  document.querySelectorAll(".corridor-key-only").forEach((node) => {
+    node.style.display = isCorridor ? "" : "none";
   });
 }
 

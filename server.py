@@ -38,6 +38,7 @@ HOST_ENV = "SPRITE_VIDEO_LAB_HOST"
 PORT_ENV = "SPRITE_VIDEO_LAB_PORT"
 FFMPEG_DIR_ENV = "SPRITE_VIDEO_LAB_FFMPEG_DIR"
 AI_MODEL_CACHE_ENV = "SPRITE_VIDEO_LAB_AI_MODEL_CACHE"
+CORRIDORKEY_ROOT_ENV = "SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT"
 LANCZOS = Image.Resampling.LANCZOS
 APP_VERSION_POLL_MS = 1200
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
@@ -96,9 +97,13 @@ DEFAULT_AI_MATTE_RESOLUTION = 1024
 AI_MATTE_MIN_RESOLUTION = 256
 AI_MATTE_MAX_RESOLUTION = 2560
 AI_MATTE_RESOLUTION_MULTIPLE = 32
+CORRIDORKEY_REPO_URL = "https://github.com/nikopueringer/CorridorKey"
+CORRIDORKEY_IMG_SIZE = 2048
+CORRIDORKEY_SCREEN_COLORS = {"auto", "green", "blue"}
 
 _FFMPEG_HWACCELS_CACHE: set[str] | None = None
 _BIREFNET_MODEL_CACHE: dict[tuple[str, str], object] = {}
+_CORRIDORKEY_ENGINE_CACHE: dict[tuple[str, str], object] = {}
 
 
 def ensure_runtime_dirs() -> None:
@@ -139,6 +144,16 @@ def default_ai_model_cache_dir() -> Path:
     if e_drive.exists():
         return e_drive / "sprite-video-lab-models" / "huggingface"
     return WORK_DIR / "models" / "huggingface"
+
+
+def default_corridorkey_root() -> Path:
+    configured = str(os.environ.get(CORRIDORKEY_ROOT_ENV, "")).strip()
+    if configured:
+        return Path(configured).expanduser()
+    e_drive = Path("E:/")
+    if e_drive.exists():
+        return e_drive / "sprite-video-lab-models" / "CorridorKey"
+    return WORK_DIR / "models" / "CorridorKey"
 
 
 def configure_ai_model_cache() -> Path:
@@ -268,6 +283,18 @@ def normalize_ai_model_key(raw: str) -> str:
 def normalize_ai_device(raw: str) -> str:
     value = str(raw or "auto").strip().lower()
     return AI_MATTE_DEVICE_ALIASES.get(value, "auto")
+
+
+def normalize_corridorkey_screen(raw: str) -> str:
+    value = str(raw or "auto").strip().lower()
+    return value if value in CORRIDORKEY_SCREEN_COLORS else "auto"
+
+
+def resolve_corridorkey_screen(raw: str, key_rgb: tuple[int, int, int]) -> str:
+    normalized = normalize_corridorkey_screen(raw)
+    if normalized != "auto":
+        return normalized
+    return "blue" if key_rgb[2] > key_rgb[1] and key_rgb[2] >= key_rgb[0] else "green"
 
 
 def resolve_ffmpeg_binary(name: str) -> str:
@@ -854,6 +881,114 @@ def load_birefnet_model(model_key: str, requested_device: str):
     return model, device, normalized_model_key, repo_id
 
 
+def import_corridorkey_dependencies():
+    configure_ai_model_cache()
+    root = default_corridorkey_root()
+    module_dir = root / "CorridorKeyModule"
+    if not module_dir.exists():
+        raise RuntimeError(
+            f"CorridorKey is not installed at {root}. Run setup_ai_runtime.bat or clone {CORRIDORKEY_REPO_URL}."
+        )
+
+    root_text = str(root)
+    if root_text not in sys.path:
+        sys.path.insert(0, root_text)
+
+    os.environ.setdefault("OPENCV_IO_ENABLE_OPENEXR", "1")
+    os.environ.setdefault("CORRIDORKEY_SKIP_COMPILE", "1")
+
+    try:
+        import importlib
+        import numpy as np
+        import torch
+    except ModuleNotFoundError as exc:
+        missing_name = getattr(exc, "name", "CorridorKey dependency")
+        raise RuntimeError(
+            f"{missing_name} is not installed. Run: python -m pip install -r requirements-ai.txt"
+        ) from exc
+
+    try:
+        corridor_backend = importlib.import_module("CorridorKeyModule.backend")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(f"CorridorKey could not be imported from {root}.") from exc
+
+    checkpoint_dir = module_dir / "checkpoints"
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+    corridor_backend.CHECKPOINT_DIR = str(checkpoint_dir)
+    return np, torch, corridor_backend, root
+
+
+def load_corridorkey_engine(requested_device: str, screen_color: str):
+    _np, torch_module, corridor_backend, root = import_corridorkey_dependencies()
+    device = resolve_ai_runtime_device(torch_module, requested_device)
+    cache_key = (device, screen_color)
+    if cache_key in _CORRIDORKEY_ENGINE_CACHE:
+        return _CORRIDORKEY_ENGINE_CACHE[cache_key], device, root
+
+    engine = corridor_backend.create_engine(
+        backend="torch",
+        device=device,
+        img_size=CORRIDORKEY_IMG_SIZE,
+        screen_color=screen_color,
+    )
+    _CORRIDORKEY_ENGINE_CACHE[cache_key] = engine
+    return engine, device, root
+
+
+def linear_to_srgb_array(values):
+    import numpy as np
+
+    clipped = np.clip(values, 0.0, None)
+    return np.where(clipped <= 0.0031308, clipped * 12.92, 1.055 * np.power(clipped, 1.0 / 2.4) - 0.055)
+
+
+def corridorkey_processed_to_image(processed) -> Image.Image:
+    import numpy as np
+
+    alpha = np.clip(processed[..., 3:4], 0.0, 1.0)
+    premul_rgb = np.clip(processed[..., :3], 0.0, None)
+    straight_linear = np.zeros_like(premul_rgb)
+    np.divide(premul_rgb, np.maximum(alpha, 1e-6), out=straight_linear, where=alpha > 1e-6)
+    straight_srgb = linear_to_srgb_array(straight_linear)
+    rgba = np.concatenate([straight_srgb, alpha], axis=-1)
+    rgba_u8 = (np.clip(rgba, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    return Image.fromarray(rgba_u8, "RGBA")
+
+
+def corridorkey_refine_frame(
+    image: Image.Image,
+    alpha_mask: Image.Image,
+    requested_device: str,
+    screen_color: str,
+    despill_strength: float,
+) -> tuple[Image.Image, dict]:
+    import numpy as np
+
+    engine, device, root = load_corridorkey_engine(requested_device, screen_color)
+    rgb = np.array(image.convert("RGB"), dtype=np.uint8, copy=True)
+    mask = np.array(alpha_mask.convert("L"), dtype=np.uint8, copy=True)
+    screen_channel = 2 if screen_color == "blue" else 1
+    result = engine.process_frame(
+        rgb,
+        mask,
+        input_is_linear=False,
+        fg_is_straight=True,
+        despill_strength=max(0.0, min(1.0, float(despill_strength or 0.0))),
+        auto_despeckle=True,
+        despeckle_size=400,
+        generate_comp=False,
+        post_process_on_gpu=True,
+        screen_channel=screen_channel,
+    )
+    return corridorkey_processed_to_image(result["processed"]), {
+        "corridorkey_enabled": True,
+        "corridorkey_screen_color": screen_color,
+        "corridorkey_device": device,
+        "corridorkey_resolution": CORRIDORKEY_IMG_SIZE,
+        "corridorkey_root": str(root),
+    }
+
+
 def fit_image_to_square(image: Image.Image, size: int) -> tuple[Image.Image, tuple[int, int, int, int]]:
     rgb = image.convert("RGB")
     width, height = rgb.size
@@ -1004,6 +1139,8 @@ def apply_matte_pipeline(
     luma_white: int,
     luma_gamma: float,
     luma_strength: float,
+    corridorkey_enabled: bool,
+    corridorkey_screen: str,
 ) -> tuple[list[Image.Image], tuple[int, int, int], dict]:
     if not raw_images:
         raise ValueError("no frames to matte")
@@ -1028,20 +1165,47 @@ def apply_matte_pipeline(
         "luma_strength": max(0.0, min(2.0, float(luma_strength or 1.0))),
         "despill_strength": max(0.0, min(2.5, float(despill_strength or 0.0))),
         "halo_pixels": max(0, int(halo_pixels)),
+        "corridorkey_enabled": False,
+        "corridorkey_screen_color": "",
+        "corridorkey_device": "",
+        "corridorkey_resolution": 0,
     }
+    use_corridorkey = bool(corridorkey_enabled and mode != "none")
+    resolved_corridorkey_screen = resolve_corridorkey_screen(corridorkey_screen, key_rgb)
 
     if mode == "none":
         return raw_images, key_rgb, matte_info
 
     if mode == "chroma":
-        keyed_frames = [
-            chroma_key_frame(image, key_rgb, threshold, softness, despill_strength, halo_pixels)
-            for image in raw_images
-        ]
+        keyed_frames = []
+        corridor_info: dict | None = None
+        for raw_image in raw_images:
+            chroma_frame = chroma_key_frame(
+                image=raw_image,
+                key_rgb=key_rgb,
+                threshold=threshold,
+                softness=softness,
+                despill_strength=despill_strength,
+                halo_pixels=halo_pixels,
+            )
+            if use_corridorkey:
+                refined_frame, corridor_info = corridorkey_refine_frame(
+                    raw_image,
+                    chroma_frame.getchannel("A"),
+                    ai_device,
+                    resolved_corridorkey_screen,
+                    matte_info["despill_strength"],
+                )
+                keyed_frames.append(refined_frame)
+            else:
+                keyed_frames.append(chroma_frame)
+        if corridor_info:
+            matte_info.update(corridor_info)
         return keyed_frames, key_rgb, matte_info
 
     keyed_frames: list[Image.Image] = []
     ai_info: dict | None = None
+    corridor_info: dict | None = None
     for raw_image in raw_images:
         ai_alpha, ai_info = birefnet_alpha_mask(raw_image, ai_model, ai_device, ai_resolution)
         if matte_info["halo_pixels"] > 0:
@@ -1059,12 +1223,23 @@ def apply_matte_pipeline(
             alpha = ImageChops.lighter(ai_alpha, luma_alpha)
         else:
             alpha = ai_alpha
-        keyed_frame = apply_alpha_mask(raw_image, alpha)
-        keyed_frame = despill_alpha_edges(keyed_frame, key_rgb, matte_info["despill_strength"])
+        if use_corridorkey:
+            keyed_frame, corridor_info = corridorkey_refine_frame(
+                raw_image,
+                alpha,
+                ai_device,
+                resolved_corridorkey_screen,
+                matte_info["despill_strength"],
+            )
+        else:
+            keyed_frame = apply_alpha_mask(raw_image, alpha)
+            keyed_frame = despill_alpha_edges(keyed_frame, key_rgb, matte_info["despill_strength"])
         keyed_frames.append(keyed_frame)
 
     if ai_info:
         matte_info.update(ai_info)
+    if corridor_info:
+        matte_info.update(corridor_info)
     return keyed_frames, key_rgb, matte_info
 
 
@@ -1219,6 +1394,8 @@ def process_video_to_job(
     luma_white: int,
     luma_gamma: float,
     luma_strength: float,
+    corridorkey_enabled: bool,
+    corridorkey_screen: str,
 ) -> dict:
     source_path, media_type = source_media_entry(upload_id)
     info = media_info(source_path, media_type)
@@ -1265,13 +1442,15 @@ def process_video_to_job(
         luma_white=luma_white,
         luma_gamma=luma_gamma,
         luma_strength=luma_strength,
+        corridorkey_enabled=corridorkey_enabled,
+        corridorkey_screen=corridorkey_screen,
     )
 
     rendered_frames, bboxes, scale = stable_resize_frames(
         keyed_frames,
         target_size,
         reduce_px,
-        hard_alpha=matte_info["mode"] == "chroma" and softness == 0,
+        hard_alpha=matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"],
     )
     frame_entries: list[dict] = []
     for index, frame in enumerate(rendered_frames):
@@ -1318,6 +1497,8 @@ def process_video_to_job(
             "softness": softness,
             "despill_strength": despill_strength,
             "halo_pixels": halo_pixels,
+            "corridorkey_enabled": matte_info["corridorkey_enabled"],
+            "corridorkey_screen": matte_info["corridorkey_screen_color"],
             "scale": scale,
         },
         "frame_count": len(frame_entries),
@@ -1351,6 +1532,8 @@ def preview_frame(
     luma_white: int,
     luma_gamma: float,
     luma_strength: float,
+    corridorkey_enabled: bool,
+    corridorkey_screen: str,
 ) -> dict:
     source_path, media_type = source_media_entry(upload_id)
     info = media_info(source_path, media_type)
@@ -1393,6 +1576,8 @@ def preview_frame(
         luma_white=luma_white,
         luma_gamma=luma_gamma,
         luma_strength=luma_strength,
+        corridorkey_enabled=corridorkey_enabled,
+        corridorkey_screen=corridorkey_screen,
     )
     keyed_image = keyed_frames[0]
 
@@ -1400,7 +1585,7 @@ def preview_frame(
         [keyed_image],
         target_size,
         reduce_px,
-        hard_alpha=matte_info["mode"] == "chroma" and softness == 0,
+        hard_alpha=matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"],
     )
     rendered_frames[0].save(processed_path)
 
@@ -1426,6 +1611,8 @@ def preview_frame(
             "softness": softness,
             "despill_strength": despill_strength,
             "halo_pixels": halo_pixels,
+            "corridorkey_enabled": matte_info["corridorkey_enabled"],
+            "corridorkey_screen": matte_info["corridorkey_screen_color"],
         },
     }
     (root / "preview.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -1585,6 +1772,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     luma_white=max(1, min(255, safe_int(payload.get("luma_white"), 230))),
                     luma_gamma=max(0.05, safe_float(payload.get("luma_gamma"), 1.0)),
                     luma_strength=max(0.0, min(2.0, safe_float(payload.get("luma_strength"), 1.0))),
+                    corridorkey_enabled=bool(payload.get("corridorkey_enabled", False)),
+                    corridorkey_screen=normalize_corridorkey_screen(str(payload.get("corridorkey_screen") or "auto")),
                 )
                 self.send_json({"ok": True, "job": result})
                 return
@@ -1610,6 +1799,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     luma_white=max(1, min(255, safe_int(payload.get("luma_white"), 230))),
                     luma_gamma=max(0.05, safe_float(payload.get("luma_gamma"), 1.0)),
                     luma_strength=max(0.0, min(2.0, safe_float(payload.get("luma_strength"), 1.0))),
+                    corridorkey_enabled=bool(payload.get("corridorkey_enabled", False)),
+                    corridorkey_screen=normalize_corridorkey_screen(str(payload.get("corridorkey_screen") or "auto")),
                 )
                 self.send_json({"ok": True, "preview": result})
                 return

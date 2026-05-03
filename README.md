@@ -22,19 +22,20 @@ The project is Windows-first, but the server and app are intentionally lightweig
 - Chroma key background removal with threshold, softness, despill, and halo controls
 - Optional BiRefNet AI matting for subject alpha
 - Optional BiRefNet + Luma mode for preserving glow, fire, lightning, particles, and other bright VFX
-- AI edge cleanup controls for green spill and dirty halos
+- Optional CorridorKey refinement for green/blue screen foreground unmixing and cleaner semi-transparent edges
+- AI edge cleanup controls for spill and dirty halos
 - Batch frame selection, animation preview, sprite sheet export, zip export, and JSON manifest export
 
 ## Matting Modes
 
-Sprite Video Lab includes four processing modes:
+Sprite Video Lab includes four base processing modes:
 
 - `Solid color / green screen`: fast chroma-key removal for controlled backgrounds.
 - `BiRefNet`: AI subject matting for non-uniform or generated backgrounds.
 - `BiRefNet + Luma`: combines the BiRefNet alpha with a brightness-derived alpha, useful for VFX-heavy sprites.
 - `No matting`: only normalize, align, and export frames.
 
-For green edges after AI matting, use manual background color selection, increase despill strength, and try a 1-2 px halo shrink.
+For green or blue screen sources, enable `CorridorKey refinement` to use the current chroma/BiRefNet alpha as a coarse hint and reconstruct cleaner foreground color plus alpha. For smaller edge fixes, use manual background color selection, increase despill strength, and try a 1-2 px halo shrink.
 
 ## Requirements
 
@@ -47,6 +48,7 @@ For green edges after AI matting, use manual background color selection, increas
   - transformers
   - huggingface-hub
   - timm and supporting image libraries
+  - CorridorKey dependencies (`safetensors`, OpenCV, NumPy)
 
 The base app only needs `requirements.txt`. AI matting uses `requirements-ai.txt`.
 
@@ -85,10 +87,16 @@ On Windows, run:
 setup_ai_runtime.bat
 ```
 
-This creates a separate AI Python environment and installs the dependencies needed for BiRefNet. Model cache location can be overridden with:
+This creates a separate AI Python environment and installs the dependencies needed for BiRefNet and CorridorKey. Model cache location can be overridden with:
 
 ```bat
 set SPRITE_VIDEO_LAB_AI_MODEL_CACHE=<model-cache-dir>
+```
+
+CorridorKey source and checkpoints can be overridden with:
+
+```bat
+set SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT=<corridorkey-dir>
 ```
 
 You can also point the server to a custom Python runtime:
@@ -131,6 +139,8 @@ http://127.0.0.1:8894
   - optional, supports `auto`, `cpu`, `cuda`, `qsv`, `d3d11va`, `dxva2`
 - `SPRITE_VIDEO_LAB_AI_MODEL_CACHE`
   - optional Hugging Face / model cache directory for AI matting
+- `SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT`
+  - optional CorridorKey checkout and checkpoint directory
 - `SPRITE_VIDEO_LAB_PYTHON`
   - optional Python executable used by the launcher
 
@@ -157,6 +167,7 @@ work/                        Runtime outputs, ignored by git
 - Keep `work/`, generated frames, test videos, model caches, and virtual environments out of git.
 - AI models are downloaded by the local runtime when selected for the first time.
 - BiRefNet uses remote model code from Hugging Face via `trust_remote_code=True`; review/pin model revisions if you need stricter supply-chain control.
+- CorridorKey is integrated as an optional local refinement engine. Review CorridorKey's license before commercial redistribution or paid inference use.
 
 ## License
 

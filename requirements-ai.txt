@@ -4,6 +4,7 @@ transformers>=4.45.0
 huggingface-hub>=0.25
 accelerate
 timm
+safetensors
 kornia
 einops
 opencv-python

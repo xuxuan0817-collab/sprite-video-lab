@@ -253,6 +253,24 @@
             <small>AI &#x6A21;&#x5F0F;&#x4E0B;&#x4F1A;&#x6536;&#x7F29;&#x667A;&#x80FD;&#x8499;&#x7248;&#xFF0C;&#x51CF;&#x5C11;&#x8FB9;&#x7F18;&#x6B8B;&#x8272;&#x3002;</small>
           </label>
 
+          <label class="field corridor-capable-only">
+            <span>CorridorKey &#x7CBE;&#x4FEE;</span>
+            <label class="checkbox-row">
+              <input id="corridorEnabledInput" type="checkbox">
+              <span>&#x7528;&#x795E;&#x7ECF;&#x7F51;&#x7EDC;&#x91CD;&#x5EFA;&#x524D;&#x666F;&#x989C;&#x8272;&#x548C;&#x8FB9;&#x7F18; alpha</span>
+            </label>
+          </label>
+
+          <label class="field corridor-key-only">
+            <span>&#x8272;&#x5E55;&#x7C7B;&#x578B;</span>
+            <select id="corridorScreenInput">
+              <option value="auto">&#x81EA;&#x52A8;</option>
+              <option value="green">&#x7EFF;&#x5E55;</option>
+              <option value="blue">&#x84DD;&#x5E55;</option>
+            </select>
+            <small>&#x81EA;&#x52A8;&#x4F1A;&#x6839;&#x636E;&#x80CC;&#x666F;&#x53D6;&#x8272;&#x9009;&#x62E9;&#x6A21;&#x578B;&#x3002;</small>
+          </label>
+
           <label class="field ai-matte-only">
             <span>BiRefNet &#x6A21;&#x578B;</span>
             <select id="aiModelInput">
@@ -260,7 +278,7 @@
               <option value="birefnet-lite-2k">lite-2K &#xFF08;&#x66F4;&#x8F7B;&#xFF09;</option>
               <option value="birefnet-general">General</option>
             </select>
-            <small>&#x9996;&#x6B21;&#x4F7F;&#x7528;&#x9700;&#x8981;&#x51C6;&#x5907;&#x672C;&#x5730;&#x6A21;&#x578B;&#xFF0C;&#x4E4B;&#x540E;&#x4F1A;&#x81EA;&#x52A8;&#x590D;&#x7528;&#x3002;</small>
+            <small>&#x901A;&#x5E38;&#x4FDD;&#x6301; HR-matting&#xFF0C;&#x5185;&#x5B58;&#x7D27;&#x5F20;&#x65F6;&#x6362;&#x7528; lite-2K&#x3002;</small>
           </label>
 
           <label class="field ai-matte-only">

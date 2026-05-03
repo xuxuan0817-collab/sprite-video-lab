@@ -1,9 +1,10 @@
 # AI Matting Runtime
 
-Sprite Video Lab can optionally use BiRefNet for AI background removal:
+Sprite Video Lab can optionally use BiRefNet and CorridorKey for AI background removal:
 
 - `BiRefNet`: subject alpha from the model.
 - `BiRefNet + Luma`: subject alpha plus brightness alpha for glow, fire, lightning, particles, and other VFX.
+- `CorridorKey refinement`: uses the current chroma/BiRefNet alpha as a coarse hint, then reconstructs foreground color and a refined alpha for green or blue screen plates.
 
 The app keeps the chroma-key workflow. AI matting is only used when you select it in step 3.
 
@@ -16,6 +17,14 @@ set SPRITE_VIDEO_LAB_AI_MODEL_CACHE=<model-cache-dir>
 ```
 
 If you do not set it, the app chooses a local default. On Windows, the helper scripts prefer keeping the optional AI runtime and model cache outside the project checkout when possible.
+
+CorridorKey is kept separately from the app checkout. Its location is controlled by:
+
+```bat
+set SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT=<corridorkey-dir>
+```
+
+The Windows helper uses the same optional AI root as the BiRefNet runtime and stores CorridorKey checkpoints under `CorridorKeyModule\checkpoints`.
 
 You can also override the Python runtime used by the launcher:
 
@@ -31,7 +40,7 @@ Run:
 setup_ai_runtime.bat
 ```
 
-The script installs the base app dependencies, optional AI dependencies, and a CUDA-enabled PyTorch wheel for Windows. If CUDA is not available on your machine, the app can still run in compatibility mode, but AI matting will be slower.
+The script installs the base app dependencies, optional AI dependencies, a CUDA-enabled PyTorch wheel for Windows, and clones CorridorKey when git is available. If CUDA is not available on your machine, the app can still run in compatibility mode, but AI matting will be slower.
 
 Then start the app as usual:
 
@@ -47,7 +56,11 @@ start_sprite_video_lab.bat
 - If the edge is still dirty, set `halo shrink` to `1` or `2`.
 - For green-screen sources, use manual background color and pick the actual background green when auto corner sampling misses the key color.
 - Use `BiRefNet + Luma` for VFX-heavy material. Use plain `BiRefNet` when there is no glow or bright particle effect to preserve.
+- Enable `CorridorKey refinement` when the alpha is acceptable but the foreground edge still contains green/blue contamination. It is most useful for true green/blue screen footage.
+- Leave CorridorKey screen type on `Auto` unless the sampled background color is misleading; force `Green` or `Blue` when needed.
 
 ## Security Note
 
 BiRefNet models are loaded through Hugging Face with `trust_remote_code=True`. For production or stricter environments, review the model repository and pin a known revision before deployment.
+
+CorridorKey is licensed separately from this app and has non-commercial/share-alike restrictions for redistribution and paid inference services. Review its upstream license before shipping it as part of a commercial product.
