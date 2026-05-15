@@ -113,7 +113,10 @@ See [AI_MATTING.md](./AI_MATTING.md) for details.
 
 ## Usage Guide
 
-For a complete Chinese walkthrough of import, trimming, matting modes, Luma subject-protection presets, CorridorKey refinement, post-processing, animation preview, reverse export, and troubleshooting, see [USAGE.zh-CN.md](./USAGE.zh-CN.md).
+For complete walkthroughs of import, trimming, matting modes, Luma subject-protection presets, CorridorKey refinement, post-processing, animation preview, reverse export, and troubleshooting, see:
+
+- [English usage guide](./USAGE.md)
+- [中文使用说明](./USAGE.zh-CN.md)
 
 ### 5. Start
 
