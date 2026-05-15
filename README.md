@@ -23,8 +23,11 @@ The project is Windows-first, but the server and app are intentionally lightweig
 - Chroma key background removal with threshold, softness, despill, and halo controls
 - Optional BiRefNet AI matting for subject alpha
 - Optional BiRefNet + Luma mode for preserving glow, fire, lightning, particles, and other bright VFX
+- Luma subject-protection presets for keeping buildings, characters, and props from becoming semi-transparent
 - Optional CorridorKey refinement for green/blue screen foreground unmixing and cleaner semi-transparent edges
 - AI edge cleanup controls for spill and dirty halos
+- Preview and batch post-processing for green residue and semi-transparent edge pixels
+- Reverse animation preview and reverse-order export
 - Batch frame selection, animation preview, sprite sheet export, zip export, and JSON manifest export
 
 ## Matting Modes
@@ -107,6 +110,10 @@ set SPRITE_VIDEO_LAB_PYTHON=<python-runtime>
 ```
 
 See [AI_MATTING.md](./AI_MATTING.md) for details.
+
+## Usage Guide
+
+For a complete Chinese walkthrough of import, trimming, matting modes, Luma subject-protection presets, CorridorKey refinement, post-processing, animation preview, reverse export, and troubleshooting, see [USAGE.zh-CN.md](./USAGE.zh-CN.md).
 
 ### 5. Start
 

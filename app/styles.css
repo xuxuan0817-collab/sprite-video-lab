@@ -898,6 +898,12 @@ button:disabled {
   width: 140px;
 }
 
+.preset-button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .zoom-label {
   min-width: 52px;
   text-align: center;
@@ -1256,6 +1262,14 @@ button:disabled {
 
 .compact-field {
   width: 180px;
+}
+
+.preview-direction-field {
+  width: 220px;
+}
+
+.preview-direction-field .checkbox-row {
+  width: 100%;
 }
 
 .export-result {

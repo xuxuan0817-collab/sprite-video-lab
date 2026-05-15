@@ -9,6 +9,7 @@ const state = {
     rafId: null,
     currentIndex: 0,
     isPlaying: true,
+    isReversed: false,
     renderToken: 0,
     warmupToken: 0,
     imageCache: new Map(),
@@ -109,7 +110,11 @@ function bindElements() {
     "lumaWhiteInput",
     "lumaGammaInput",
     "lumaStrengthInput",
+    "batchGreenToBlackInput",
+    "batchSemiTransparentToBlackInput",
     "previewFrameButton",
+    "greenToBlackButton",
+    "semiTransparentToBlackButton",
     "savePreviewButton",
     "processPreviewTimeLabel",
     "processPreviewKeyLabel",
@@ -142,6 +147,7 @@ function bindElements() {
     "previewProgressLabel",
     "previewPlayPauseButton",
     "previewRestartButton",
+    "previewReverseInput",
     "previewBackgroundInput",
     "previewBackgroundLabel",
     "previewIntervalInput",
@@ -164,9 +170,14 @@ function bindEvents() {
   els.importPathButton.addEventListener("click", importFromPath);
   els.uploadInput.addEventListener("change", handleUploadInputChange);
   els.previewFrameButton.addEventListener("click", previewCurrentFrame);
-  els.savePreviewButton.addEventListener("click", saveProcessPreviewResult);
+  els.greenToBlackButton.addEventListener("click", applyGreenToBlackPreview);
+  els.semiTransparentToBlackButton.addEventListener("click", applySemiTransparentToBlackPreview);
+  els.savePreviewButton.addEventListener("click", downloadProcessPreviewResult);
   els.processButton.addEventListener("click", processVideo);
   els.exportButton.addEventListener("click", exportFrames);
+  document.querySelectorAll("[data-luma-preset]").forEach((button) => {
+    button.addEventListener("click", () => applyLumaPreset(button.dataset.lumaPreset));
+  });
   bindUploadDropzone();
 
   bindTimePair("start", els.startRange, els.startInput, els.startStepDownButton, els.startStepUpButton);
@@ -253,6 +264,12 @@ function bindEvents() {
 
   els.previewPlayPauseButton.addEventListener("click", togglePreviewPlayback);
   els.previewRestartButton.addEventListener("click", restartPreviewPlayback);
+  els.previewReverseInput.addEventListener("change", () => {
+    state.preview.isReversed = els.previewReverseInput.checked;
+    state.preview.currentIndex = 0;
+    syncAnimationPreview();
+    persistSession();
+  });
   els.previewBackgroundInput.addEventListener("input", () => {
     updatePreviewBackground(els.previewBackgroundInput.value, true);
     syncAnimationPreview(false);
@@ -293,6 +310,8 @@ function bindEvents() {
     els.lumaWhiteInput,
     els.lumaGammaInput,
     els.lumaStrengthInput,
+    els.batchGreenToBlackInput,
+    els.batchSemiTransparentToBlackInput,
     els.startInput,
     els.endInput,
   ].forEach((element) => {
@@ -546,6 +565,49 @@ function normalizeAiResolutionInput(shouldPersist = true) {
   }
 }
 
+const LUMA_PRESETS = {
+  soft: {
+    label: "\u6E29\u548C",
+    black: 4,
+    white: 110,
+    gamma: 0.7,
+    strength: 1.3,
+  },
+  balanced: {
+    label: "\u4E2D\u7B49",
+    black: 0,
+    white: 85,
+    gamma: 0.55,
+    strength: 1.7,
+  },
+  strong: {
+    label: "\u5F3A\u529B",
+    black: 0,
+    white: 65,
+    gamma: 0.45,
+    strength: 2,
+  },
+};
+
+function applyLumaPreset(key) {
+  const preset = LUMA_PRESETS[key];
+  if (!preset) {
+    return;
+  }
+  els.chromaEnabledInput.checked = true;
+  els.matteModeInput.value = "birefnet_luma";
+  els.haloInput.value = "0";
+  els.corridorEnabledInput.checked = false;
+  els.aiResolutionInput.value = "2560";
+  els.lumaBlackInput.value = String(preset.black);
+  els.lumaWhiteInput.value = String(preset.white);
+  els.lumaGammaInput.value = String(preset.gamma);
+  els.lumaStrengthInput.value = String(preset.strength);
+  updateChromaVisibility();
+  persistSession();
+  setStatus(`\u5DF2\u5957\u7528\u4E3B\u4F53\u4FDD\u62A4\u9884\u8BBE\uFF1A${preset.label}\u3002`, "success");
+}
+
 function collectFormState() {
   return {
     keep_every: Number(els.keepEveryInput.value || 1),
@@ -569,8 +631,11 @@ function collectFormState() {
     luma_white: Number(els.lumaWhiteInput.value || 230),
     luma_gamma: Number(els.lumaGammaInput.value || 1),
     luma_strength: Number(els.lumaStrengthInput.value || 1),
+    batch_green_to_black: els.batchGreenToBlackInput.checked,
+    batch_semitransparent_to_black: els.batchSemiTransparentToBlackInput.checked,
     preview_background: state.preview.background,
     preview_interval: clamp(Number(els.previewIntervalInput.value || 100), 20, 5000),
+    preview_reversed: state.preview.isReversed,
     process_preview_zoom: {
       source: state.processPreviewZoom.source,
       processed: state.processPreviewZoom.processed,
@@ -609,6 +674,8 @@ function collectProcessingPayload() {
     luma_white: Number(els.lumaWhiteInput.value || 230),
     luma_gamma: Number(els.lumaGammaInput.value || 1),
     luma_strength: Number(els.lumaStrengthInput.value || 1),
+    batch_green_to_black: els.batchGreenToBlackInput.checked,
+    batch_semitransparent_to_black: els.batchSemiTransparentToBlackInput.checked,
   };
 }
 
@@ -651,8 +718,16 @@ function applyFormState(snapshot) {
   if (snapshot.luma_white != null) els.lumaWhiteInput.value = String(snapshot.luma_white);
   if (snapshot.luma_gamma != null) els.lumaGammaInput.value = String(snapshot.luma_gamma);
   if (snapshot.luma_strength != null) els.lumaStrengthInput.value = String(snapshot.luma_strength);
+  if (snapshot.batch_green_to_black != null) els.batchGreenToBlackInput.checked = Boolean(snapshot.batch_green_to_black);
+  if (snapshot.batch_semitransparent_to_black != null) {
+    els.batchSemiTransparentToBlackInput.checked = Boolean(snapshot.batch_semitransparent_to_black);
+  }
   updatePreviewBackground(snapshot.preview_background || state.preview.background, false);
   if (snapshot.preview_interval != null) els.previewIntervalInput.value = String(snapshot.preview_interval);
+  state.preview.isReversed = Boolean(snapshot.preview_reversed);
+  if (els.previewReverseInput) {
+    els.previewReverseInput.checked = state.preview.isReversed;
+  }
   if (snapshot.process_preview_zoom) {
     updateProcessPreviewZoom("source", Number(snapshot.process_preview_zoom.source || 100), false);
     updateProcessPreviewZoom("processed", Number(snapshot.process_preview_zoom.processed || 100), false);
@@ -684,6 +759,7 @@ function persistSession() {
       preview: {
         isPlaying: state.preview.isPlaying,
         currentIndex: state.preview.currentIndex,
+        isReversed: state.preview.isReversed,
       },
       form: collectFormState(),
       savedAt: new Date().toISOString(),
@@ -726,6 +802,10 @@ function restoreSessionFromStorage() {
 
   if (snapshot.preview && typeof snapshot.preview.isPlaying === "boolean") {
     state.preview.isPlaying = snapshot.preview.isPlaying;
+  }
+  if (snapshot.preview && typeof snapshot.preview.isReversed === "boolean") {
+    state.preview.isReversed = snapshot.preview.isReversed;
+    els.previewReverseInput.checked = state.preview.isReversed;
   }
 
   if (snapshot.processPreview) {
@@ -1333,46 +1413,129 @@ async function previewCurrentFrame() {
   });
 }
 
-async function saveProcessPreviewResult() {
-  if (!isImageUpload()) {
-    setStatus("\u5F53\u524D\u53EA\u6709\u5355\u5F20\u56FE\u7247\u9884\u89C8\u53EF\u4EE5\u76F4\u63A5\u4FDD\u5B58\u3002", "error");
+async function downloadProcessPreviewResult() {
+  if (!state.processPreview?.processed_url) {
+    setStatus("\u5148\u9884\u89C8\u5F53\u524D\u5E27\uFF0C\u518D\u4E0B\u8F7D\u9884\u89C8\u56FE\u3002", "error");
     return;
   }
   if (!state.processPreview?.preview_id) {
-    setStatus("\u5148\u9884\u89C8\u5355\u5F20\u56FE\u7247\uFF0C\u518D\u4FDD\u5B58\u7ED3\u679C\u3002", "error");
+    setStatus("\u8FD9\u5F20\u9884\u89C8\u56FE\u7F3A\u5C11\u6807\u8BC6\uFF0C\u8BF7\u91CD\u65B0\u9884\u89C8\u4E00\u6B21\u3002", "error");
     return;
   }
 
   await withBusy(els.savePreviewButton, async () => {
-    setStatus("\u6B63\u5728\u4FDD\u5B58\u5F53\u524D\u9884\u89C8\u7ED3\u679C...");
-    const data = await apiJson("/api/save-preview", {
-      method: "POST",
-      body: {
-        preview_id: state.processPreview.preview_id,
-      },
-    });
-    state.job = data.job;
-    state.exportResult = null;
-    state.selected = new Set(data.job.frames.map((frame) => frame.index));
-    state.preview.currentIndex = 0;
-    renderJob();
-    updateSavePreviewButton();
-    els.resultPanel.scrollIntoView({ behavior: "smooth", block: "start" });
-    setStatus("\u9884\u89C8\u7ED3\u679C\u5DF2\u4FDD\u5B58\u4E3A\u6B63\u5F0F\u5355\u5F20\u8F93\u51FA\u3002", "success");
+    const filename = buildPreviewDownloadFilename();
+    triggerFileDownload(state.processPreview.processed_url, filename);
+    setStatus(`\u5DF2\u5F00\u59CB\u4E0B\u8F7D\u9884\u89C8\u56FE\uFF1A${filename}`, "success");
   });
 }
 
-function updateSavePreviewButton() {
-  if (!els.savePreviewButton) {
+async function applyGreenToBlackPreview() {
+  if (!state.processPreview?.preview_id) {
+    setStatus("\u5148\u9884\u89C8\u5F53\u524D\u5E27\uFF0C\u518D\u5904\u7406\u6B8B\u7559\u7EFF\u8272\u3002", "error");
     return;
   }
 
-  const previewMediaType = String(state.processPreview?.source_media_type || uploadMediaType()).toLowerCase();
+  await withBusy(els.greenToBlackButton, async () => {
+    setStatus("\u6B63\u5728\u628A\u9884\u89C8\u56FE\u91CC\u7684\u6B8B\u7559\u7EFF\u8272\u6D82\u9ED1...");
+    const data = await apiJson("/api/preview-green-to-black", {
+      method: "POST",
+      body: {
+        preview_id: state.processPreview.preview_id,
+        threshold: 42,
+        dominance: 24,
+      },
+    });
+    state.processPreview = data.preview;
+    renderProcessPreview();
+    const changed = Number(data.preview?.postprocess?.green_to_black?.changed_pixels || 0);
+    setStatus(`\u6B8B\u7EFF\u6D82\u9ED1\u5B8C\u6210\uFF0C\u5904\u7406\u4E86 ${changed.toLocaleString()} \u4E2A\u50CF\u7D20\u3002`, "success");
+  });
+}
+
+async function applySemiTransparentToBlackPreview() {
+  if (!state.processPreview?.preview_id) {
+    setStatus("\u5148\u9884\u89C8\u5F53\u524D\u5E27\uFF0C\u518D\u5904\u7406\u534A\u900F\u660E\u50CF\u7D20\u3002", "error");
+    return;
+  }
+
+  await withBusy(els.semiTransparentToBlackButton, async () => {
+    setStatus("\u6B63\u5728\u628A\u9884\u89C8\u56FE\u91CC\u7684\u534A\u900F\u660E\u50CF\u7D20\u6D82\u9ED1...");
+    const data = await apiJson("/api/preview-semitransparent-to-black", {
+      method: "POST",
+      body: {
+        preview_id: state.processPreview.preview_id,
+        alpha_min: 1,
+        alpha_max: 254,
+      },
+    });
+    state.processPreview = data.preview;
+    renderProcessPreview();
+    const changed = Number(data.preview?.postprocess?.semitransparent_to_black?.changed_pixels || 0);
+    setStatus(`\u534A\u900F\u6D82\u9ED1\u5B8C\u6210\uFF0C\u5904\u7406\u4E86 ${changed.toLocaleString()} \u4E2A\u50CF\u7D20\u3002`, "success");
+  });
+}
+
+function buildPreviewDownloadFilename() {
+  const sourceName = stripFileExtension(state.upload?.display_name || "");
+  const safeSourceName = sanitizeDownloadFilenamePart(sourceName, "sprite-preview");
+  const safePreviewId = sanitizeDownloadFilenamePart(state.processPreview?.preview_id || localTimestamp(), localTimestamp());
+  return `${safeSourceName}-preview-${safePreviewId}.png`;
+}
+
+function stripFileExtension(name) {
+  return String(name || "").replace(/\.[^./\\]+$/, "");
+}
+
+function sanitizeDownloadFilenamePart(value, fallback) {
+  const cleaned = String(value || "")
+    .replace(/[<>:"/\\|?*\u0000-\u001F]+/g, "-")
+    .replace(/\s+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^\.+/, "")
+    .replace(/[.\- ]+$/g, "")
+    .slice(0, 80);
+  return cleaned || fallback;
+}
+
+function localTimestamp() {
+  const now = new Date();
+  const pad = (value) => String(value).padStart(2, "0");
+  return [
+    now.getFullYear(),
+    pad(now.getMonth() + 1),
+    pad(now.getDate()),
+    "-",
+    pad(now.getHours()),
+    pad(now.getMinutes()),
+    pad(now.getSeconds()),
+  ].join("");
+}
+
+function triggerFileDownload(url, filename) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.rel = "noopener";
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
+function updateSavePreviewButton() {
+  if (!els.savePreviewButton || !els.greenToBlackButton || !els.semiTransparentToBlackButton) {
+    return;
+  }
+
   const isSameUpload = !state.processPreview?.upload_id || state.processPreview.upload_id === state.upload?.upload_id;
-  const isImage = isImageUpload() && previewMediaType === "image";
-  const canSave = isImage && isSameUpload && Boolean(state.processPreview?.preview_id);
-  els.savePreviewButton.hidden = !isImageUpload();
-  els.savePreviewButton.disabled = !canSave;
+  const canDownload = Boolean(state.upload && isSameUpload && state.processPreview?.preview_id && state.processPreview?.processed_url);
+  const canPostprocess = Boolean(state.upload && isSameUpload && state.processPreview?.preview_id);
+  els.greenToBlackButton.hidden = !state.upload;
+  els.greenToBlackButton.disabled = !canPostprocess;
+  els.semiTransparentToBlackButton.hidden = !state.upload;
+  els.semiTransparentToBlackButton.disabled = !canPostprocess;
+  els.savePreviewButton.hidden = !state.upload;
+  els.savePreviewButton.disabled = !canDownload;
 }
 
 function renderJob() {
@@ -1472,7 +1635,8 @@ function getSelectedFrames() {
   if (!state.job) {
     return [];
   }
-  return state.job.frames.filter((frame) => state.selected.has(frame.index));
+  const frames = state.job.frames.filter((frame) => state.selected.has(frame.index));
+  return state.preview.isReversed ? frames.reverse() : frames;
 }
 
 function getSegmentFrameRate(upload = state.upload) {
@@ -1733,6 +1897,7 @@ function updatePreviewControls(selectedCount) {
   const progressPercent = hasFrames ? ((currentIndex + 1) / selectedCount) * 100 : 0;
   els.previewPlayPauseButton.disabled = !canAnimate;
   els.previewRestartButton.disabled = !hasFrames;
+  els.previewReverseInput.disabled = !hasFrames;
   els.previewProgressFill.style.width = `${progressPercent}%`;
   els.previewProgressLabel.textContent = hasFrames
     ? `${currentIndex + 1} / ${selectedCount}`
@@ -1879,12 +2044,13 @@ async function exportFrames() {
   }
 
   await withBusy(els.exportButton, async () => {
-    setStatus("\u6b63\u5728\u5bfc\u51fa\u9009\u4e2d\u5e27...");
+    setStatus(state.preview.isReversed ? "\u6b63\u5728\u5012\u5e8f\u5bfc\u51fa\u9009\u4e2d\u5e27..." : "\u6b63\u5728\u5bfc\u51fa\u9009\u4e2d\u5e27...");
+    const selectedFrames = getSelectedFrames();
     const data = await apiJson("/api/export", {
       method: "POST",
       body: {
         job_id: state.job.job_id,
-        selected_indices: Array.from(state.selected).sort((a, b) => a - b),
+        selected_indices: selectedFrames.map((frame) => frame.index),
         sheet_columns: Number(els.sheetColumnsInput.value || 4),
       },
     });

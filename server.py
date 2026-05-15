@@ -99,6 +99,7 @@ AI_MATTE_MAX_RESOLUTION = 2560
 AI_MATTE_RESOLUTION_MULTIPLE = 32
 CORRIDORKEY_REPO_URL = "https://github.com/nikopueringer/CorridorKey"
 CORRIDORKEY_IMG_SIZE = 2048
+CORRIDORKEY_GPU_DESPECKLE_PIXEL_LIMIT = 2**24
 CORRIDORKEY_SCREEN_COLORS = {"auto", "green", "blue"}
 CANVAS_MODES = {"auto", "square_bottom", "square_center"}
 
@@ -929,10 +930,54 @@ def import_corridorkey_dependencies():
     except ModuleNotFoundError as exc:
         raise RuntimeError(f"CorridorKey could not be imported from {root}.") from exc
 
+    try:
+        corridor_inference = importlib.import_module("CorridorKeyModule.inference_engine")
+    except ModuleNotFoundError as exc:
+        raise RuntimeError(f"CorridorKey inference engine could not be imported from {root}.") from exc
+
+    patch_corridorkey_gpu_despeckle(corridor_inference, torch)
+
     checkpoint_dir = module_dir / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     corridor_backend.CHECKPOINT_DIR = str(checkpoint_dir)
     return np, torch, corridor_backend, root
+
+
+def patch_corridorkey_gpu_despeckle(corridor_inference, torch_module) -> None:
+    try:
+        color_utils = corridor_inference.cu
+        transforms_functional = corridor_inference.TF
+    except Exception:
+        return
+    if getattr(color_utils.clean_matte_torch, "_sprite_video_lab_safe", False):
+        return
+
+    original_clean_matte_torch = color_utils.clean_matte_torch
+    functional = torch_module.nn.functional
+
+    def safe_clean_matte_torch(alpha, area_threshold: int, dilation: int = 15, blur_size: int = 5):
+        _batch, _channels, height, width = alpha.shape
+        if (height * width) <= CORRIDORKEY_GPU_DESPECKLE_PIXEL_LIMIT:
+            return original_clean_matte_torch(alpha, area_threshold, dilation=dilation, blur_size=blur_size)
+
+        mask = (alpha > 0.25).to(dtype=alpha.dtype)
+        if area_threshold > 0:
+            opening_radius = max(1, min(4, area_threshold // 100))
+            kernel_size = (opening_radius * 2) + 1
+            for _ in range(2):
+                mask = -functional.max_pool2d(-mask, kernel_size, stride=1, padding=opening_radius)
+                mask = functional.max_pool2d(mask, kernel_size, stride=1, padding=opening_radius)
+        if dilation > 0:
+            repeats = max(1, dilation // 2)
+            for _ in range(repeats):
+                mask = functional.max_pool2d(mask, 5, stride=1, padding=2)
+        if blur_size > 0:
+            kernel_size = int(blur_size * 2 + 1)
+            mask = transforms_functional.gaussian_blur(mask, [kernel_size, kernel_size])
+        return alpha * mask
+
+    safe_clean_matte_torch._sprite_video_lab_safe = True
+    color_utils.clean_matte_torch = safe_clean_matte_torch
 
 
 def load_corridorkey_engine(requested_device: str, screen_color: str):
@@ -972,6 +1017,48 @@ def corridorkey_processed_to_image(processed) -> Image.Image:
     return Image.fromarray(rgba_u8, "RGBA")
 
 
+def corridorkey_auto_despeckle_on_gpu(image: Image.Image) -> bool:
+    return True
+
+
+def corridorkey_postprocess_on_gpu(device: str) -> bool:
+    return str(device).startswith("cuda")
+
+
+def corridorkey_process_arrays(
+    engine,
+    rgb,
+    mask,
+    screen_channel: int,
+    despill_strength: float,
+    post_process_on_gpu: bool,
+    auto_despeckle: bool,
+):
+    result = engine.process_frame(
+        rgb,
+        mask,
+        input_is_linear=False,
+        fg_is_straight=True,
+        despill_strength=max(0.0, min(1.0, float(despill_strength or 0.0))),
+        auto_despeckle=auto_despeckle,
+        despeckle_size=400,
+        generate_comp=False,
+        post_process_on_gpu=post_process_on_gpu,
+        screen_channel=screen_channel,
+    )
+    return result
+
+
+def corridorkey_alpha_to_image(alpha) -> Image.Image:
+    import numpy as np
+
+    alpha_array = np.asarray(alpha)
+    if alpha_array.ndim == 3:
+        alpha_array = alpha_array[..., 0]
+    alpha_u8 = (np.clip(alpha_array, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8)
+    return Image.fromarray(alpha_u8, "L")
+
+
 def corridorkey_refine_frame(
     image: Image.Image,
     alpha_mask: Image.Image,
@@ -982,28 +1069,38 @@ def corridorkey_refine_frame(
     import numpy as np
 
     engine, device, root = load_corridorkey_engine(requested_device, screen_color)
+    screen_channel = 2 if screen_color == "blue" else 1
+    post_process_on_gpu = corridorkey_postprocess_on_gpu(device)
+    auto_despeckle = not post_process_on_gpu or corridorkey_auto_despeckle_on_gpu(image)
+    uses_safe_despeckle = post_process_on_gpu and (image.size[0] * image.size[1]) > CORRIDORKEY_GPU_DESPECKLE_PIXEL_LIMIT
     rgb = np.array(image.convert("RGB"), dtype=np.uint8, copy=True)
     mask = np.array(alpha_mask.convert("L"), dtype=np.uint8, copy=True)
-    screen_channel = 2 if screen_color == "blue" else 1
-    result = engine.process_frame(
+    result = corridorkey_process_arrays(
+        engine,
         rgb,
         mask,
-        input_is_linear=False,
-        fg_is_straight=True,
-        despill_strength=max(0.0, min(1.0, float(despill_strength or 0.0))),
-        auto_despeckle=True,
-        despeckle_size=400,
-        generate_comp=False,
-        post_process_on_gpu=True,
-        screen_channel=screen_channel,
+        screen_channel,
+        despill_strength,
+        post_process_on_gpu,
+        auto_despeckle,
     )
-    return corridorkey_processed_to_image(result["processed"]), {
+    alpha = corridorkey_alpha_to_image(result["processed"][..., 3:4])
+    refined = apply_alpha_mask(image, alpha)
+    refined = despill_alpha_edges(refined, auto_key_color(image), despill_strength)
+
+    info = {
         "corridorkey_enabled": True,
+        "corridorkey_color_source": "original",
         "corridorkey_screen_color": screen_color,
         "corridorkey_device": device,
         "corridorkey_resolution": CORRIDORKEY_IMG_SIZE,
+        "corridorkey_post_process": "gpu" if post_process_on_gpu else "cpu",
+        "corridorkey_auto_despeckle": auto_despeckle,
+        "corridorkey_safe_despeckle": uses_safe_despeckle,
+        "corridorkey_tiled": False,
         "corridorkey_root": str(root),
     }
+    return refined, info
 
 
 def fit_image_to_square(image: Image.Image, size: int) -> tuple[Image.Image, tuple[int, int, int, int]]:
@@ -1435,6 +1532,8 @@ def process_video_to_job(
     luma_strength: float,
     corridorkey_enabled: bool,
     corridorkey_screen: str,
+    batch_green_to_black: bool = False,
+    batch_semitransparent_to_black: bool = False,
 ) -> dict:
     source_path, media_type = source_media_entry(upload_id)
     info = media_info(source_path, media_type)
@@ -1493,11 +1592,21 @@ def process_video_to_job(
         hard_alpha=matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"],
     )
     frame_entries: list[dict] = []
+    postprocess_changed = {
+        "green_to_black": 0,
+        "semitransparent_to_black": 0,
+    }
     for index, frame in enumerate(rendered_frames):
         frame_name = f"frame_{index + 1:03d}.png"
         thumb_name = f"thumb_{index + 1:03d}.png"
         frame_path = processed_dir / frame_name
         thumb_path = thumbs_dir / thumb_name
+        if batch_green_to_black:
+            frame, changed = green_to_black_image(frame)
+            postprocess_changed["green_to_black"] += changed
+        if batch_semitransparent_to_black:
+            frame, changed = semitransparent_to_black_image(frame)
+            postprocess_changed["semitransparent_to_black"] += changed
         frame.save(frame_path)
         thumb = frame.copy()
         thumb.thumbnail((128, 128))
@@ -1544,6 +1653,9 @@ def process_video_to_job(
             "halo_pixels": halo_pixels,
             "corridorkey_enabled": matte_info["corridorkey_enabled"],
             "corridorkey_screen": matte_info["corridorkey_screen_color"],
+            "batch_green_to_black": bool(batch_green_to_black),
+            "batch_semitransparent_to_black": bool(batch_semitransparent_to_black),
+            "postprocess_changed_pixels": postprocess_changed,
             "scale": scale,
         },
         "frame_count": len(frame_entries),
@@ -1565,6 +1677,121 @@ def load_preview_manifest(preview_id: str) -> dict:
     if not path.exists():
         raise FileNotFoundError(f"preview not found: {preview_id}")
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_preview_manifest(preview_id: str, manifest: dict) -> None:
+    root = preview_dir(preview_id)
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "preview.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def green_to_black_image(
+    image: Image.Image,
+    threshold: int = 42,
+    dominance: int = 24,
+    alpha_floor: int = 1,
+) -> tuple[Image.Image, int]:
+    rgba = image.convert("RGBA")
+    output_pixels: list[tuple[int, int, int, int]] = []
+    changed = 0
+    threshold = max(0, min(255, int(threshold)))
+    dominance = max(0, min(255, int(dominance)))
+    alpha_floor = max(0, min(255, int(alpha_floor)))
+
+    for r_value, g_value, b_value, alpha in rgba.getdata():
+        raw_green_excess = g_value - max(r_value, b_value)
+        is_raw_green = g_value >= threshold and raw_green_excess >= dominance
+        is_alpha_scaled_green = False
+        if alpha > 0:
+            alpha_scale = 255.0 / alpha
+            scaled_r = min(255, round(r_value * alpha_scale))
+            scaled_g = min(255, round(g_value * alpha_scale))
+            scaled_b = min(255, round(b_value * alpha_scale))
+            scaled_green_excess = scaled_g - max(scaled_r, scaled_b)
+            is_alpha_scaled_green = scaled_g >= threshold and scaled_green_excess >= dominance
+        is_green = alpha >= alpha_floor and (is_raw_green or is_alpha_scaled_green)
+        if is_green:
+            output_pixels.append((0, 0, 0, alpha))
+            changed += 1
+        else:
+            output_pixels.append((r_value, g_value, b_value, alpha))
+
+    cleaned = Image.new("RGBA", rgba.size)
+    cleaned.putdata(output_pixels)
+    return cleaned, changed
+
+
+def green_to_black_preview(preview_id: str, threshold: int = 42, dominance: int = 24) -> dict:
+    preview = load_preview_manifest(preview_id)
+    root = preview_dir(preview["preview_id"])
+    processed_path = root / "processed.png"
+    if not processed_path.exists():
+        raise FileNotFoundError(f"processed preview missing: {processed_path}")
+
+    image = open_rgba_image(processed_path)
+    cleaned, changed = green_to_black_image(image, threshold=threshold, dominance=dominance)
+    image.close()
+    cleaned.save(processed_path)
+    cleaned.close()
+
+    postprocess = preview.setdefault("postprocess", {})
+    green_black = postprocess.setdefault("green_to_black", {})
+    green_black["enabled"] = True
+    green_black["threshold"] = max(0, min(255, int(threshold)))
+    green_black["dominance"] = max(0, min(255, int(dominance)))
+    green_black["changed_pixels"] = changed
+    green_black["updated_at"] = iso_now()
+    preview["processed_url"] = f"/work/previews/{preview['preview_id']}/processed.png?ts={int(time.time() * 1000)}"
+    save_preview_manifest(preview["preview_id"], preview)
+    return preview
+
+
+def semitransparent_to_black_image(
+    image: Image.Image,
+    alpha_min: int = 1,
+    alpha_max: int = 254,
+) -> tuple[Image.Image, int]:
+    rgba = image.convert("RGBA")
+    output_pixels: list[tuple[int, int, int, int]] = []
+    changed = 0
+    alpha_min = max(0, min(255, int(alpha_min)))
+    alpha_max = max(alpha_min, min(255, int(alpha_max)))
+
+    for r_value, g_value, b_value, alpha in rgba.getdata():
+        if alpha_min <= alpha <= alpha_max:
+            output_pixels.append((0, 0, 0, alpha))
+            changed += 1
+        else:
+            output_pixels.append((r_value, g_value, b_value, alpha))
+
+    cleaned = Image.new("RGBA", rgba.size)
+    cleaned.putdata(output_pixels)
+    return cleaned, changed
+
+
+def semitransparent_to_black_preview(preview_id: str, alpha_min: int = 1, alpha_max: int = 254) -> dict:
+    preview = load_preview_manifest(preview_id)
+    root = preview_dir(preview["preview_id"])
+    processed_path = root / "processed.png"
+    if not processed_path.exists():
+        raise FileNotFoundError(f"processed preview missing: {processed_path}")
+
+    image = open_rgba_image(processed_path)
+    cleaned, changed = semitransparent_to_black_image(image, alpha_min=alpha_min, alpha_max=alpha_max)
+    image.close()
+    cleaned.save(processed_path)
+    cleaned.close()
+
+    postprocess = preview.setdefault("postprocess", {})
+    semitransparent_black = postprocess.setdefault("semitransparent_to_black", {})
+    semitransparent_black["enabled"] = True
+    semitransparent_black["alpha_min"] = max(0, min(255, int(alpha_min)))
+    semitransparent_black["alpha_max"] = max(0, min(255, int(alpha_max)))
+    semitransparent_black["changed_pixels"] = changed
+    semitransparent_black["updated_at"] = iso_now()
+    preview["processed_url"] = f"/work/previews/{preview['preview_id']}/processed.png?ts={int(time.time() * 1000)}"
+    save_preview_manifest(preview["preview_id"], preview)
+    return preview
 
 
 def preview_frame(
@@ -1779,7 +2006,12 @@ def export_job(job_id: str, selected_indices: list[int], sheet_columns: int) -> 
     frames_dir.mkdir(parents=True, exist_ok=True)
 
     frame_map = {entry["index"]: entry for entry in manifest["frames"]}
-    indices = sorted(index for index in selected_indices if index in frame_map)
+    seen_indices: set[int] = set()
+    indices: list[int] = []
+    for index in selected_indices:
+        if index in frame_map and index not in seen_indices:
+            indices.append(index)
+            seen_indices.add(index)
     if not indices:
         raise ValueError("no frames selected for export")
 
@@ -1927,6 +2159,8 @@ class AppHandler(BaseHTTPRequestHandler):
                     luma_strength=max(0.0, min(2.0, safe_float(payload.get("luma_strength"), 1.0))),
                     corridorkey_enabled=bool(payload.get("corridorkey_enabled", False)),
                     corridorkey_screen=normalize_corridorkey_screen(str(payload.get("corridorkey_screen") or "auto")),
+                    batch_green_to_black=bool(payload.get("batch_green_to_black", False)),
+                    batch_semitransparent_to_black=bool(payload.get("batch_semitransparent_to_black", False)),
                 )
                 self.send_json({"ok": True, "job": result})
                 return
@@ -1962,6 +2196,24 @@ class AppHandler(BaseHTTPRequestHandler):
                 payload = self.read_json_body()
                 result = save_preview_as_job(str(payload.get("preview_id") or ""))
                 self.send_json({"ok": True, "job": result})
+                return
+            if parsed.path == "/api/preview-green-to-black":
+                payload = self.read_json_body()
+                result = green_to_black_preview(
+                    str(payload.get("preview_id") or ""),
+                    threshold=max(0, min(255, safe_int(payload.get("threshold"), 42))),
+                    dominance=max(0, min(255, safe_int(payload.get("dominance"), 24))),
+                )
+                self.send_json({"ok": True, "preview": result})
+                return
+            if parsed.path == "/api/preview-semitransparent-to-black":
+                payload = self.read_json_body()
+                result = semitransparent_to_black_preview(
+                    str(payload.get("preview_id") or ""),
+                    alpha_min=max(0, min(255, safe_int(payload.get("alpha_min"), 1))),
+                    alpha_max=max(0, min(255, safe_int(payload.get("alpha_max"), 254))),
+                )
+                self.send_json({"ok": True, "preview": result})
                 return
             if parsed.path == "/api/export":
                 payload = self.read_json_body()
