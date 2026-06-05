@@ -4,10 +4,12 @@ Sprite Video Lab can optionally use BiRefNet and CorridorKey for AI background r
 
 - `BiRefNet`: subject alpha from the model.
 - `Luma`: brightness-derived alpha for glow, fire, lightning, particles, and bright-on-dark VFX.
-- `BiRefNet + Luma`: subject alpha plus brightness alpha for glow, fire, lightning, particles, and other VFX.
+- `BiRefNet subject / Luma restore brights`: subject alpha plus brightness alpha for glow, fire, lightning, particles, and other VFX.
+- `BiRefNet then Luma tighten`: intersects the BiRefNet alpha with the brightness alpha so Luma can remove more background.
 - `CorridorKey`: uses the green-screen key alpha as a coarse hint, then reconstructs foreground color and a refined alpha for green or blue screen plates.
-- `BiRefNet + CorridorKey`: uses the BiRefNet alpha as the coarse hint for CorridorKey.
-- `BiRefNet + Luma + CorridorKey`: combines subject alpha and brightness alpha first, then uses that combined alpha as the CorridorKey hint.
+- `BiRefNet rough matte / CorridorKey refine`: uses the BiRefNet alpha as the coarse hint for CorridorKey.
+- `BiRefNet then CorridorKey tighten`: refines with CorridorKey, then intersects the result with the BiRefNet alpha so CorridorKey can only remove more background.
+- `BiRefNet + Luma merge / CorridorKey refine`: combines subject alpha and brightness alpha first, then uses that combined alpha as the CorridorKey hint.
 
 The app keeps the chroma-key workflow. AI matting is only used when you select it in step 3.
 
@@ -58,7 +60,7 @@ start_sprite_video_lab.bat
 - If a green edge remains, raise `despill strength` first. Try `1.2` to `1.8`.
 - If the edge is still dirty, set `halo shrink` to `1` or `2`.
 - For green-screen sources, use manual background color and pick the actual background green when auto corner sampling misses the key color.
-- Use `BiRefNet + Luma` for VFX-heavy material. Use plain `BiRefNet` when there is no glow or bright particle effect to preserve.
+- Use `BiRefNet subject / Luma restore brights` for VFX-heavy material. Use plain `BiRefNet` when there is no glow or bright particle effect to preserve.
 - Enable `CorridorKey refinement` when the alpha is acceptable but the foreground edge still contains green/blue contamination. It is most useful for true green/blue screen footage.
 - Leave CorridorKey screen type on `Auto` unless the sampled background color is misleading; force `Green` or `Blue` when needed.
 

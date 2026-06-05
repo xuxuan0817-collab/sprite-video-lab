@@ -861,13 +861,16 @@ button:disabled {
 .process-preview-canvases {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto 1fr;
+  align-items: start;
   gap: 16px;
   margin-top: 18px;
 }
 
 .image-preview-box {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 2;
   gap: 10px;
 }
 
@@ -877,6 +880,10 @@ button:disabled {
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
+}
+
+.image-preview-header > :not(.image-preview-title) {
+  margin-left: auto;
 }
 
 .image-preview-title {
@@ -1473,6 +1480,10 @@ button:disabled {
   .image-preview-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .image-preview-header > :not(.image-preview-title) {
+    margin-left: 0;
   }
 }
 

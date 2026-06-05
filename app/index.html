@@ -219,12 +219,14 @@
               <option value="birefnet">&#x53EA;&#x7528; BiRefNet</option>
               <option value="corridorkey">&#x53EA;&#x7528; CorridorKey</option>
               <option value="luma">&#x53EA;&#x7528; Luma</option>
-              <option value="birefnet_corridorkey">BiRefNet + CorridorKey</option>
-              <option value="birefnet_luma">BiRefNet + Luma</option>
-              <option value="birefnet_luma_corridorkey">BiRefNet + Luma + CorridorKey</option>
+              <option value="birefnet_corridorkey">BiRefNet &#x7C97;&#x8499;&#x7248; / CorridorKey &#x7CBE;&#x4FEE;&#x8FB9;&#x7F18;</option>
+              <option value="birefnet_corridorkey_key">BiRefNet &#x540E;&#x518D;&#x7528; CorridorKey &#x6536;&#x7D27;&#x62A0;&#x56FE;</option>
+              <option value="birefnet_luma">BiRefNet &#x4FDD;&#x4E3B;&#x4F53; / Luma &#x8865;&#x4EAE;&#x90E8;</option>
+              <option value="birefnet_luma_key">BiRefNet &#x540E;&#x518D;&#x7528; Luma &#x6536;&#x7D27;&#x62A0;&#x56FE;</option>
+              <option value="birefnet_luma_corridorkey">BiRefNet + Luma &#x5408;&#x5E76;&#x540E; / CorridorKey &#x7CBE;&#x4FEE;</option>
               <option value="none">&#x4E0D;&#x62A0;&#x56FE;&#xFF0C;&#x53EA;&#x7F29;&#x653E;&#x5BF9;&#x9F50;</option>
             </select>
-            <small>CorridorKey &#x4F1A;&#x5148;&#x7528;&#x7EFF;&#x5E55;&#x7B97;&#x6CD5;&#x751F;&#x6210;&#x7C97; alpha&#xFF0C;&#x518D;&#x91CD;&#x5EFA;&#x8FB9;&#x7F18;&#x3002;</small>
+            <small>&#x201C;&#x7CBE;&#x4FEE;&#x201D;&#x4F1A;&#x5141;&#x8BB8;&#x4E0B;&#x4E00;&#x6B65;&#x8865;&#x8FB9;&#xFF1B;&#x201C;&#x6536;&#x7D27;&#x201D;&#x53EA;&#x4F1A;&#x8FDB;&#x4E00;&#x6B65;&#x5220;&#x6389;&#x80CC;&#x666F;&#x3002;</small>
           </label>
 
           <label class="field">
@@ -393,7 +395,8 @@
                     <button id="previewSourceZoomOutButton" class="ghost-button compact-button" type="button">-</button>
                     <input id="previewSourceZoomInput" type="range" min="50" max="800" step="10" value="100">
                     <span id="previewSourceZoomLabel" class="zoom-label">100%</span>
-                    <button id="previewSourceZoomResetButton" class="ghost-button compact-button" type="button">&#x91CD;&#x7F6E;</button>
+                    <button id="previewSourceZoomResetButton" class="ghost-button compact-button" type="button" title="&#x7F29;&#x653E;&#x91CD;&#x7F6E;&#x4E3A; 100%">100%</button>
+                    <button id="previewSourcePanResetButton" class="ghost-button compact-button" type="button" title="&#x4F4D;&#x7F6E;&#x56DE;&#x4E2D;">&#x56DE;&#x4E2D;</button>
                     <button id="previewSourceZoomInButton" class="ghost-button compact-button" type="button">+</button>
                   </div>
                 </div>
@@ -420,7 +423,8 @@
                     <button id="previewProcessedZoomOutButton" class="ghost-button compact-button" type="button">-</button>
                     <input id="previewProcessedZoomInput" type="range" min="50" max="800" step="10" value="100">
                     <span id="previewProcessedZoomLabel" class="zoom-label">100%</span>
-                    <button id="previewProcessedZoomResetButton" class="ghost-button compact-button" type="button">&#x91CD;&#x7F6E;</button>
+                    <button id="previewProcessedZoomResetButton" class="ghost-button compact-button" type="button" title="&#x7F29;&#x653E;&#x91CD;&#x7F6E;&#x4E3A; 100%">100%</button>
+                    <button id="previewProcessedPanResetButton" class="ghost-button compact-button" type="button" title="&#x4F4D;&#x7F6E;&#x56DE;&#x4E2D;">&#x56DE;&#x4E2D;</button>
                     <button id="previewProcessedZoomInButton" class="ghost-button compact-button" type="button">+</button>
                   </div>
                 </div>

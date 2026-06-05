@@ -132,6 +132,7 @@ function bindElements() {
     "previewSourceZoomLabel",
     "previewSourceZoomOutButton",
     "previewSourceZoomResetButton",
+    "previewSourcePanResetButton",
     "previewSourceZoomInButton",
     "previewProcessedImage",
     "previewProcessedEmpty",
@@ -144,6 +145,7 @@ function bindElements() {
     "previewProcessedZoomLabel",
     "previewProcessedZoomOutButton",
     "previewProcessedZoomResetButton",
+    "previewProcessedPanResetButton",
     "previewProcessedZoomInButton",
     "processStepShell",
     "processLockNote",
@@ -325,8 +327,8 @@ function bindEvents() {
   bindProcessPreviewPan("source");
   bindProcessPreviewPan("processed");
   window.addEventListener("resize", () => {
-    clampProcessPreviewPanToStage("source");
-    clampProcessPreviewPanToStage("processed");
+    applyProcessPreviewTransform("source");
+    applyProcessPreviewTransform("processed");
   });
 
   [
@@ -401,7 +403,7 @@ function bindTimePair(key, rangeEl, numberEl, decreaseButton, increaseButton) {
 }
 
 function bindProcessPreviewZoom(kind) {
-  const { input, decreaseButton, resetButton, increaseButton } = getProcessPreviewElements(kind);
+  const { input, decreaseButton, zoomResetButton, panResetButton, increaseButton } = getProcessPreviewElements(kind);
 
   input.addEventListener("input", () => {
     updateProcessPreviewZoom(kind, Number(input.value || 100), true);
@@ -409,8 +411,11 @@ function bindProcessPreviewZoom(kind) {
   decreaseButton.addEventListener("click", () => {
     updateProcessPreviewZoom(kind, state.processPreviewZoom[kind] - 10, true);
   });
-  resetButton.addEventListener("click", () => {
-    resetProcessPreviewView(kind, true);
+  zoomResetButton.addEventListener("click", () => {
+    resetProcessPreviewZoom(kind, true);
+  });
+  panResetButton.addEventListener("click", () => {
+    resetProcessPreviewPan(kind, true);
   });
   increaseButton.addEventListener("click", () => {
     updateProcessPreviewZoom(kind, state.processPreviewZoom[kind] + 10, true);
@@ -424,7 +429,7 @@ function bindProcessPreviewPan(kind) {
   }
 
   image.addEventListener("load", () => {
-    clampProcessPreviewPanToStage(kind);
+    applyProcessPreviewTransform(kind);
   });
 
   stage.addEventListener("pointerdown", (event) => {
@@ -495,7 +500,8 @@ function getProcessPreviewElements(kind) {
     image,
     stage: image?.closest(".image-preview-stage") || null,
     decreaseButton: isSource ? els.previewSourceZoomOutButton : els.previewProcessedZoomOutButton,
-    resetButton: isSource ? els.previewSourceZoomResetButton : els.previewProcessedZoomResetButton,
+    zoomResetButton: isSource ? els.previewSourceZoomResetButton : els.previewProcessedZoomResetButton,
+    panResetButton: isSource ? els.previewSourcePanResetButton : els.previewProcessedPanResetButton,
     increaseButton: isSource ? els.previewSourceZoomInButton : els.previewProcessedZoomInButton,
   };
 }
@@ -508,7 +514,7 @@ function updateProcessPreviewZoom(kind, value, shouldPersist = false) {
 
   input.value = String(normalized);
   label.textContent = `${normalized}%`;
-  clampProcessPreviewPanToStage(kind);
+  applyProcessPreviewTransform(kind);
 
   if (shouldPersist) {
     persistSession();
@@ -516,32 +522,14 @@ function updateProcessPreviewZoom(kind, value, shouldPersist = false) {
 }
 
 function updateProcessPreviewPan(kind, x, y) {
-  state.processPreviewPan[kind] = getClampedProcessPreviewPan(kind, x, y);
+  state.processPreviewPan[kind] = normalizeProcessPreviewPan(x, y);
   applyProcessPreviewTransform(kind);
 }
 
-function clampProcessPreviewPanToStage(kind) {
-  const pan = state.processPreviewPan[kind] || { x: 0, y: 0 };
-  updateProcessPreviewPan(kind, pan.x, pan.y);
-}
-
-function getClampedProcessPreviewPan(kind, x, y) {
-  const { image, stage } = getProcessPreviewElements(kind);
+function normalizeProcessPreviewPan(x, y) {
   const panX = Number.isFinite(Number(x)) ? Number(x) : 0;
   const panY = Number.isFinite(Number(y)) ? Number(y) : 0;
-  if (!image || !stage || image.hidden || !image.getAttribute("src")) {
-    return { x: 0, y: 0 };
-  }
-
-  const scale = state.processPreviewZoom[kind] / 100;
-  const renderedWidth = image.offsetWidth * scale;
-  const renderedHeight = image.offsetHeight * scale;
-  const maxX = Math.max(0, (renderedWidth - stage.clientWidth) / 2);
-  const maxY = Math.max(0, (renderedHeight - stage.clientHeight) / 2);
-  return {
-    x: clamp(panX, -maxX, maxX),
-    y: clamp(panY, -maxY, maxY),
-  };
+  return { x: panX, y: panY };
 }
 
 function applyProcessPreviewTransform(kind) {
@@ -554,14 +542,24 @@ function applyProcessPreviewTransform(kind) {
   image.style.transform = `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${scale})`;
 }
 
-function resetProcessPreviewPan(kind) {
+function resetProcessPreviewPan(kind, shouldPersist = false) {
   state.processPreviewPan[kind] = { x: 0, y: 0 };
   applyProcessPreviewTransform(kind);
+  if (shouldPersist) {
+    persistSession();
+  }
+}
+
+function resetProcessPreviewZoom(kind, shouldPersist = false) {
+  updateProcessPreviewZoom(kind, 100, false);
+  if (shouldPersist) {
+    persistSession();
+  }
 }
 
 function resetProcessPreviewView(kind, shouldPersist = false) {
-  updateProcessPreviewZoom(kind, 100, false);
-  resetProcessPreviewPan(kind);
+  resetProcessPreviewZoom(kind, false);
+  resetProcessPreviewPan(kind, false);
   if (shouldPersist) {
     persistSession();
   }
@@ -589,17 +587,24 @@ function matteModeUsesBiRefNet(mode) {
   return (
     mode === "birefnet" ||
     mode === "birefnet_corridorkey" ||
+    mode === "birefnet_corridorkey_key" ||
     mode === "birefnet_luma" ||
+    mode === "birefnet_luma_key" ||
     mode === "birefnet_luma_corridorkey"
   );
 }
 
 function matteModeUsesCorridorKey(mode) {
-  return mode === "corridorkey" || mode === "birefnet_corridorkey" || mode === "birefnet_luma_corridorkey";
+  return (
+    mode === "corridorkey" ||
+    mode === "birefnet_corridorkey" ||
+    mode === "birefnet_corridorkey_key" ||
+    mode === "birefnet_luma_corridorkey"
+  );
 }
 
 function matteModeUsesLuma(mode) {
-  return mode === "luma" || mode === "birefnet_luma" || mode === "birefnet_luma_corridorkey";
+  return mode === "luma" || mode === "birefnet_luma" || mode === "birefnet_luma_key" || mode === "birefnet_luma_corridorkey";
 }
 
 function matteModeUsesChromaSeed(mode) {
@@ -1088,9 +1093,11 @@ function formatMatteModeLabel(matte) {
   if (mode === "birefnet") label = "BiRefNet";
   if (mode === "corridorkey") label = "CorridorKey";
   if (mode === "luma") label = "Luma";
-  if (mode === "birefnet_corridorkey") label = "BiRefNet + CorridorKey";
-  if (mode === "birefnet_luma") label = "BiRefNet + Luma";
-  if (mode === "birefnet_luma_corridorkey") label = "BiRefNet + Luma + CorridorKey";
+  if (mode === "birefnet_corridorkey") label = "BiRefNet \u7C97\u8499\u7248 / CorridorKey \u7CBE\u4FEE\u8FB9\u7F18";
+  if (mode === "birefnet_corridorkey_key") label = "BiRefNet \u540E\u518D\u7528 CorridorKey \u6536\u7D27\u62A0\u56FE";
+  if (mode === "birefnet_luma") label = "BiRefNet \u4FDD\u4E3B\u4F53 / Luma \u8865\u4EAE\u90E8";
+  if (mode === "birefnet_luma_key") label = "BiRefNet \u540E\u518D\u7528 Luma \u6536\u7D27\u62A0\u56FE";
+  if (mode === "birefnet_luma_corridorkey") label = "BiRefNet + Luma \u5408\u5E76\u540E / CorridorKey \u7CBE\u4FEE";
   if (
     mode !== "none" &&
     !matteModeUsesCorridorKey(mode) &&
