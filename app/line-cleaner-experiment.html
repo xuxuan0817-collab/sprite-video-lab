@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sprite Shrink Experiment</title>
+  <link rel="stylesheet" href="/app/line-cleaner-experiment.css">
+</head>
+<body>
+  <main class="experiment-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Sprite Video Lab / Experiment</p>
+        <h1>&#x52A8;&#x753B;&#x5E27;&#x7F29;&#x5C0F;&#x6E05;&#x7406;&#x5B9E;&#x9A8C;</h1>
+      </div>
+      <div class="topbar-actions">
+        <label class="button">
+          <input id="fileInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/*" multiple>
+          &#x9009;&#x62E9;&#x5E27;
+        </label>
+        <label class="button">
+          <input id="folderInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/*" multiple webkitdirectory>
+          &#x9009;&#x62E9;&#x6587;&#x4EF6;&#x5939;
+        </label>
+        <button id="processButton" class="primary-button" type="button" disabled>&#x751F;&#x6210;&#x5BF9;&#x6BD4;</button>
+      </div>
+    </header>
+
+    <section id="dropzone" class="dropzone" tabindex="0">
+      <strong>&#x62D6;&#x5165;&#x900F;&#x660E; PNG / JPG / WebP / BMP &#x5E8F;&#x5217;&#x5E27;</strong>
+      <span id="dropzoneHint">&#x6309;&#x6587;&#x4EF6;&#x540D;&#x81EA;&#x7136;&#x6392;&#x5E8F;&#xFF1B;&#x5BFC;&#x5165;&#x540E;&#x4F1A;&#x7ACB;&#x5373;&#x540C;&#x6B65;&#x64AD;&#x653E;</span>
+    </section>
+
+    <section class="stats-grid" aria-live="polite">
+      <div class="stat">
+        <span>&#x5E27;&#x6570;</span>
+        <strong id="frameCount">0</strong>
+      </div>
+      <div class="stat">
+        <span>&#x539F;&#x59CB;&#x4F53;&#x79EF;</span>
+        <strong id="sourceBytes">-</strong>
+      </div>
+      <div class="stat">
+        <span>&#x5904;&#x7406;&#x540E;&#x4F53;&#x79EF;</span>
+        <strong id="processedBytes">-</strong>
+      </div>
+      <div class="stat">
+        <span>&#x8F93;&#x51FA;&#x753B;&#x5E03;</span>
+        <strong id="canvasSize">-</strong>
+      </div>
+      <div class="stat">
+        <span>&#x8282;&#x7701;</span>
+        <strong id="savingRatio">-</strong>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <aside class="controls">
+        <div class="control-row">
+          <label for="fpsInput">&#x64AD;&#x653E; FPS</label>
+          <input id="fpsInput" type="number" min="1" max="60" step="1" value="12">
+        </div>
+
+        <div class="control-row">
+          <label for="methodInput">&#x5904;&#x7406;&#x8DEF;&#x7EBF;</label>
+          <select id="methodInput">
+            <option value="classic" selected>&#x666E;&#x901A;&#x7F29;&#x5C0F; / Lanczos</option>
+            <option value="realesrgan_anime">Real-ESRGAN anime &#x5148;&#x6574;&#x7EBF;&#x518D;&#x7F29;&#x5C0F;</option>
+          </select>
+        </div>
+
+        <div class="transport">
+          <button id="playButton" type="button" disabled>&#x64AD;&#x653E;</button>
+          <button id="restartButton" type="button" disabled>&#x91CD;&#x7F6E;</button>
+        </div>
+        <div class="zoom-control">
+          <button id="zoomOutButton" type="button" aria-label="zoom out" disabled>-</button>
+          <span id="zoomLabel">100%</span>
+          <button id="zoomInButton" type="button" aria-label="zoom in" disabled>+</button>
+        </div>
+
+        <div class="control-row">
+          <label for="scaleInput">&#x8F93;&#x51FA;&#x500D;&#x6570;</label>
+          <input id="scaleInput" type="number" min="0.05" max="2" step="0.05" value="0.5">
+        </div>
+        <div class="control-row">
+          <label for="alphaCutoffInput">&#x900F;&#x660E;&#x6E05;&#x7406; <output id="alphaCutoffValue">8</output></label>
+          <input id="alphaCutoffInput" type="range" min="0" max="80" step="1" value="8">
+        </div>
+        <div class="control-row">
+          <label for="sharpenInput">&#x7F29;&#x5C0F;&#x540E;&#x9510;&#x5316; <output id="sharpenValue">80%</output></label>
+          <input id="sharpenInput" type="range" min="0" max="220" step="5" value="80">
+        </div>
+        <div class="control-row">
+          <label for="colorCountInput">&#x6700;&#x5927;&#x989C;&#x8272;&#x6570; <output id="colorCountValue">128</output></label>
+          <input id="colorCountInput" type="range" min="16" max="256" step="8" value="128">
+        </div>
+
+        <div class="control-actions">
+          <button id="downloadCurrentButton" type="button" disabled>&#x4E0B;&#x8F7D;&#x5F53;&#x524D;&#x5E27;</button>
+          <button id="downloadAllButton" type="button" disabled>&#x4E0B;&#x8F7D; TAR</button>
+        </div>
+        <p id="status" class="status">&#x7B49;&#x5F85;&#x5BFC;&#x5165;&#x3002;</p>
+      </aside>
+
+      <section class="viewer-shell">
+        <div class="viewer-head">
+          <span id="frameLabel">#000</span>
+          <span id="frameName">-</span>
+        </div>
+        <div class="viewer-grid">
+          <figure class="viewer">
+            <figcaption>&#x539F;&#x52A8;&#x753B;</figcaption>
+            <canvas id="sourceCanvas"></canvas>
+          </figure>
+          <figure class="viewer">
+            <figcaption>&#x5904;&#x7406;&#x540E;&#x52A8;&#x753B;</figcaption>
+            <canvas id="processedCanvas"></canvas>
+          </figure>
+        </div>
+        <div id="frameStrip" class="frame-strip"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app/line-cleaner-experiment.js"></script>
+</body>
+</html>

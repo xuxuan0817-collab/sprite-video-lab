@@ -30,6 +30,7 @@ UPLOADS_DIR = WORK_DIR / "uploads"
 JOBS_DIR = WORK_DIR / "jobs"
 EXPORTS_DIR = WORK_DIR / "exports"
 PREVIEWS_DIR = WORK_DIR / "previews"
+LINE_CLEANER_DIR = WORK_DIR / "line-cleaner"
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8894
@@ -37,11 +38,13 @@ DEFAULT_FFMPEG_FALLBACK_ROOT = Path(r"I:\FF\Flowframes\FlowframesData\pkgs\av")
 HOST_ENV = "SPRITE_VIDEO_LAB_HOST"
 PORT_ENV = "SPRITE_VIDEO_LAB_PORT"
 FFMPEG_DIR_ENV = "SPRITE_VIDEO_LAB_FFMPEG_DIR"
+REAL_ESRGAN_BINARY_ENV = "SPRITE_VIDEO_LAB_REALESRGAN_BIN"
+REAL_ESRGAN_MODEL_DIR_ENV = "SPRITE_VIDEO_LAB_REALESRGAN_MODEL_DIR"
 AI_MODEL_CACHE_ENV = "SPRITE_VIDEO_LAB_AI_MODEL_CACHE"
 CORRIDORKEY_ROOT_ENV = "SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT"
 LANCZOS = Image.Resampling.LANCZOS
 APP_VERSION_POLL_MS = 1200
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".gif"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 ANIMATION_FRAME_EXTENSIONS = IMAGE_EXTENSIONS
 CONTENT_TYPE_EXTENSIONS = {
@@ -49,6 +52,7 @@ CONTENT_TYPE_EXTENSIONS = {
     "video/quicktime": ".mov",
     "video/x-matroska": ".mkv",
     "video/webm": ".webm",
+    "image/gif": ".gif",
     "image/png": ".png",
     "image/jpeg": ".jpg",
     "image/webp": ".webp",
@@ -114,6 +118,8 @@ CORRIDORKEY_IMG_SIZE = 2048
 CORRIDORKEY_GPU_DESPECKLE_PIXEL_LIMIT = 2**24
 CORRIDORKEY_SCREEN_COLORS = {"auto", "green", "blue"}
 CANVAS_MODES = {"auto", "square_bottom", "square_center"}
+LINE_CLEANER_METHODS = {"classic", "realesrgan_anime"}
+REAL_ESRGAN_ANIME_MODEL = "realesrgan-x4plus-anime"
 
 _FFMPEG_HWACCELS_CACHE: set[str] | None = None
 _BIREFNET_MODEL_CACHE: dict[tuple[str, str], object] = {}
@@ -121,7 +127,7 @@ _CORRIDORKEY_ENGINE_CACHE: dict[tuple[str, str], object] = {}
 
 
 def ensure_runtime_dirs() -> None:
-    for directory in (APP_DIR, WORK_DIR, UPLOADS_DIR, JOBS_DIR, EXPORTS_DIR, PREVIEWS_DIR):
+    for directory in (APP_DIR, WORK_DIR, UPLOADS_DIR, JOBS_DIR, EXPORTS_DIR, PREVIEWS_DIR, LINE_CLEANER_DIR):
         directory.mkdir(parents=True, exist_ok=True)
 
 
@@ -685,6 +691,8 @@ def sniff_media_extension(path: Path) -> str:
         return ".bmp"
     if len(head) >= 12 and head.startswith(b"RIFF") and head[8:12] == b"WEBP":
         return ".webp"
+    if head.startswith(b"GIF87a") or head.startswith(b"GIF89a"):
+        return ".gif"
     return ""
 
 
@@ -775,22 +783,75 @@ def source_media_entry(upload_id: str) -> tuple[Path, str]:
 
 
 def source_video_path(upload_id: str) -> Path:
+    manifest = load_upload_manifest(upload_id)
+    preview_path = str(manifest.get("preview_path") or "").strip()
+    if preview_path:
+        path = repair_mojibake_path(Path(preview_path))
+        if path.exists():
+            return path
     path, _ = source_media_entry(upload_id)
     return path
 
 
-def build_upload_payload(upload_id: str, source_path: Path, display_name: str, media_type: str) -> dict:
-    info = media_info(source_path, media_type)
+def build_upload_payload(
+    upload_id: str,
+    source_path: Path,
+    display_name: str,
+    media_type: str,
+    preview_path: Path | None = None,
+) -> dict:
+    info_path = preview_path if preview_path and preview_path.exists() and media_type == "video" else source_path
+    info = media_info(info_path, media_type)
     return {
         "upload_id": upload_id,
         "display_name": display_name,
         "media_url": f"/media/upload/{upload_id}",
         "video_url": f"/media/upload/{upload_id}",
         "source_path": str(source_path),
+        "preview_path": str(preview_path) if preview_path else "",
         "media_type": media_type,
         "video_info": info,
         "media_info": info,
     }
+
+
+def is_gif_source(path: Path) -> bool:
+    if path.suffix.lower() == ".gif":
+        return True
+    try:
+        return sniff_media_extension(path) == ".gif"
+    except Exception:
+        return False
+
+
+def create_gif_video_preview(source_path: Path, output_path: Path) -> Path:
+    ffmpeg = resolve_ffmpeg_binary("ffmpeg")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = output_path.with_name(f"{output_path.stem}.tmp{output_path.suffix}")
+    if temp_path.exists():
+        temp_path.unlink()
+    if output_path.exists():
+        output_path.unlink()
+    run_process(
+        [
+            ffmpeg,
+            "-y",
+            "-i",
+            str(source_path),
+            "-vf",
+            "scale=ceil(iw/2)*2:ceil(ih/2)*2",
+            "-movflags",
+            "+faststart",
+            "-pix_fmt",
+            "yuv420p",
+            str(temp_path),
+        ]
+    )
+    if not temp_path.exists() or temp_path.stat().st_size <= 0:
+        temp_path.unlink(missing_ok=True)
+        raise RuntimeError("failed to create GIF video preview")
+    temp_path.replace(output_path)
+    return output_path
 
 
 def register_video_from_path(source_path: Path) -> dict:
@@ -800,15 +861,19 @@ def register_video_from_path(source_path: Path) -> dict:
     media_type = detect_media_type(source_path)
 
     upload_id = timestamped_id()
+    preview_path: Path | None = None
+    if media_type == "video" and is_gif_source(source_path):
+        preview_path = create_gif_video_preview(source_path, upload_dir(upload_id) / "preview.mp4")
     manifest = {
         "upload_id": upload_id,
         "source_path": str(source_path),
+        "preview_path": str(preview_path) if preview_path else "",
         "display_name": source_path.name,
         "media_type": media_type,
         "created_at": iso_now(),
     }
     save_upload_manifest(upload_id, manifest)
-    return build_upload_payload(upload_id, source_path, source_path.name, media_type)
+    return build_upload_payload(upload_id, source_path, source_path.name, media_type, preview_path)
 
 
 def register_uploaded_file(file_item) -> dict:
@@ -827,15 +892,19 @@ def register_uploaded_file(file_item) -> dict:
         target_path.rename(renamed_path)
         target_path = renamed_path
         filename = target_path.name
+    preview_path: Path | None = None
+    if media_type == "video" and is_gif_source(target_path):
+        preview_path = create_gif_video_preview(target_path, target_dir / "preview.mp4")
     manifest = {
         "upload_id": upload_id,
         "source_path": str(target_path),
+        "preview_path": str(preview_path) if preview_path else "",
         "display_name": filename,
         "media_type": media_type,
         "created_at": iso_now(),
     }
     save_upload_manifest(upload_id, manifest)
-    return build_upload_payload(upload_id, target_path, filename, media_type)
+    return build_upload_payload(upload_id, target_path, filename, media_type, preview_path)
 
 
 def auto_key_color(image: Image.Image) -> tuple[int, int, int]:
@@ -1189,15 +1258,51 @@ def fit_image_to_square(image: Image.Image, size: int) -> tuple[Image.Image, tup
     return canvas, (left, top, left + resized_size[0], top + resized_size[1])
 
 
-def birefnet_alpha_mask(
+def birefnet_mask_score(mask: Image.Image) -> dict:
+    alpha = mask.convert("L")
+    total = max(1, alpha.size[0] * alpha.size[1])
+    histogram = alpha.histogram()
+    strong_pixels = sum(histogram[160:256])
+    visible_pixels = total - histogram[0]
+    max_alpha = max(index for index, count in enumerate(histogram) if count)
+    mean_alpha = sum(index * count for index, count in enumerate(histogram)) / total
+    return {
+        "max_alpha": max_alpha,
+        "mean_alpha": mean_alpha,
+        "visible_pixels": visible_pixels,
+        "strong_pixels": strong_pixels,
+        "visible_ratio": visible_pixels / total,
+        "strong_ratio": strong_pixels / total,
+    }
+
+
+def is_weak_birefnet_mask(score: dict) -> bool:
+    max_alpha = int(score.get("max_alpha") or 0)
+    strong_ratio = float(score.get("strong_ratio") or 0.0)
+    visible_ratio = float(score.get("visible_ratio") or 0.0)
+    return max_alpha < 80 or (max_alpha < 128 and strong_ratio < 0.002 and visible_ratio < 0.08)
+
+
+def should_use_birefnet_fallback(current_score: dict, fallback_score: dict) -> bool:
+    current_max = int(current_score.get("max_alpha") or 0)
+    fallback_max = int(fallback_score.get("max_alpha") or 0)
+    current_strong = float(current_score.get("strong_ratio") or 0.0)
+    fallback_strong = float(fallback_score.get("strong_ratio") or 0.0)
+    if fallback_max < 128:
+        return False
+    if fallback_max >= max(160, current_max * 2) and fallback_strong > current_strong:
+        return True
+    return current_max < 80 and fallback_strong >= 0.005
+
+
+def run_birefnet_inference(
     image: Image.Image,
     model_key: str,
     requested_device: str,
-    inference_resolution: int,
+    resolution: int,
 ) -> tuple[Image.Image, dict]:
     torch_module, transforms, _auto_model = import_ai_matte_dependencies()
     model, device, normalized_model_key, repo_id = load_birefnet_model(model_key, requested_device)
-    resolution = normalize_ai_resolution(inference_resolution)
     fitted_image, fitted_box = fit_image_to_square(image, resolution)
     transform = transforms.Compose(
         [
@@ -1223,6 +1328,41 @@ def birefnet_alpha_mask(
         "device": device,
         "resolution": resolution,
     }
+
+
+def birefnet_alpha_mask(
+    image: Image.Image,
+    model_key: str,
+    requested_device: str,
+    inference_resolution: int,
+) -> tuple[Image.Image, dict]:
+    normalized_model_key = normalize_ai_model_key(model_key)
+    resolution = normalize_ai_resolution(inference_resolution)
+    mask, info = run_birefnet_inference(image, normalized_model_key, requested_device, resolution)
+    score = birefnet_mask_score(mask)
+    info["mask_score"] = score
+    info["requested_model_key"] = normalized_model_key
+    info["fallback_model_key"] = ""
+    info["fallback_reason"] = ""
+
+    fallback_model_key = "birefnet-general"
+    if normalized_model_key != fallback_model_key and is_weak_birefnet_mask(score):
+        fallback_mask, fallback_info = run_birefnet_inference(image, fallback_model_key, requested_device, resolution)
+        fallback_score = birefnet_mask_score(fallback_mask)
+        if should_use_birefnet_fallback(score, fallback_score):
+            fallback_info["mask_score"] = fallback_score
+            fallback_info["requested_model_key"] = normalized_model_key
+            fallback_info["fallback_model_key"] = fallback_model_key
+            fallback_info["fallback_reason"] = "selected BiRefNet model produced a weak alpha mask"
+            return fallback_mask, fallback_info
+
+    return mask, info
+
+
+def update_ai_model_after_fallback(ai_model: str, ai_info: dict | None) -> str:
+    if not ai_info:
+        return ai_model
+    return str(ai_info.get("model_key") or ai_model)
 
 
 def luminance_alpha_mask(
@@ -1412,8 +1552,10 @@ def apply_matte_pipeline(
     keyed_frames: list[Image.Image] = []
     ai_info: dict | None = None
     corridor_info: dict | None = None
+    resolved_ai_model = ai_model
     for raw_image in raw_images:
-        ai_alpha, ai_info = birefnet_alpha_mask(raw_image, ai_model, ai_device, ai_resolution)
+        ai_alpha, ai_info = birefnet_alpha_mask(raw_image, resolved_ai_model, ai_device, ai_resolution)
+        resolved_ai_model = update_ai_model_after_fallback(resolved_ai_model, ai_info)
         if matte_info["halo_pixels"] > 0:
             filter_size = (matte_info["halo_pixels"] * 2) + 1
             ai_alpha = ai_alpha.filter(ImageFilter.MinFilter(filter_size))
@@ -1609,6 +1751,8 @@ def process_video_to_job(
     upload_id: str,
     start_time: float,
     end_time: float,
+    start_frame: int,
+    end_frame: int,
     keep_every: int,
     target_size: int,
     reduce_px: int,
@@ -1643,8 +1787,19 @@ def process_video_to_job(
     elif media_type == "image":
         start_time = 0.0
         end_time = 0.0
+        start_frame = 1
+        end_frame = 1
     if media_type == "video" and end_time <= start_time:
         raise ValueError("end time must be greater than start time")
+    if media_type == "video":
+        requested_start_frame = int(start_frame or 0)
+        requested_end_frame = int(end_frame or 0)
+        if requested_start_frame > 0 and requested_end_frame >= requested_start_frame:
+            start_frame = requested_start_frame
+            end_frame = requested_end_frame
+        else:
+            start_frame = 0
+            end_frame = 0
 
     job_id = timestamped_id()
     root = job_dir(job_id)
@@ -1659,7 +1814,13 @@ def process_video_to_job(
         _, ffmpeg_accel = extract_image_frame(source_path, raw_path)
         raw_paths = [raw_path]
     else:
-        raw_paths, ffmpeg_accel = extract_raw_frames(source_path, raw_dir, start_time, end_time, max(1, keep_every))
+        raw_paths, ffmpeg_accel = extract_raw_frames(
+            source_path,
+            raw_dir,
+            start_time,
+            end_time,
+            max(1, keep_every),
+        )
     raw_images = [open_rgba_image(path) for path in raw_paths]
 
     keyed_frames, key_rgb, matte_info = apply_matte_pipeline(
@@ -1739,6 +1900,8 @@ def process_video_to_job(
         "options": {
             "start_time": start_time,
             "end_time": end_time,
+            "start_frame": start_frame,
+            "end_frame": end_frame,
             "keep_every": keep_every,
             "target_size": target_size,
             "reduce_px": reduce_px,
@@ -2288,6 +2451,247 @@ def import_animation_frames_to_job(file_items: list) -> dict:
     return manifest
 
 
+def line_cleaner_dir(run_id: str) -> Path:
+    return LINE_CLEANER_DIR / run_id
+
+
+def resolve_realesrgan_binary() -> str | None:
+    configured = str(os.environ.get(REAL_ESRGAN_BINARY_ENV, "")).strip().strip("\"'")
+    if configured:
+        path = Path(configured).expanduser()
+        if path.exists() and path.is_file():
+            return str(path)
+    for name in ("realesrgan-ncnn-vulkan.exe", "realesrgan-ncnn-vulkan"):
+        found = shutil.which(name)
+        if found:
+            return found
+    for path in (
+        ROOT_DIR / "tools" / "realesrgan-ncnn-vulkan.exe",
+        ROOT_DIR / "tools" / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan.exe",
+        WORK_DIR / "tools" / "realesrgan-ncnn-vulkan.exe",
+        WORK_DIR / "tools" / "realesrgan-ncnn-vulkan" / "realesrgan-ncnn-vulkan.exe",
+    ):
+        if path.exists() and path.is_file():
+            return str(path)
+    return None
+
+
+def resolve_realesrgan_model_dir(binary: str | None = None) -> Path | None:
+    configured = str(os.environ.get(REAL_ESRGAN_MODEL_DIR_ENV, "")).strip().strip("\"'")
+    candidates: list[Path] = []
+    if configured:
+        candidates.append(Path(configured).expanduser())
+    if binary:
+        candidates.append(Path(binary).resolve().parent / "models")
+    candidates.extend(
+        [
+            ROOT_DIR / "tools" / "realesrgan-ncnn-vulkan" / "models",
+            WORK_DIR / "tools" / "realesrgan-ncnn-vulkan" / "models",
+        ]
+    )
+    for path in candidates:
+        param_path = path / f"{REAL_ESRGAN_ANIME_MODEL}.param"
+        bin_path = path / f"{REAL_ESRGAN_ANIME_MODEL}.bin"
+        if param_path.exists() and bin_path.exists():
+            return path
+    return None
+
+
+def realesrgan_missing_message() -> str:
+    return (
+        "Real-ESRGAN anime is not ready. Expected "
+        "realesrgan-ncnn-vulkan.exe plus models/realesrgan-x4plus-anime.param and .bin. "
+        f"Set {REAL_ESRGAN_BINARY_ENV} and optionally {REAL_ESRGAN_MODEL_DIR_ENV}, "
+        "or install the portable package under work/tools/realesrgan-ncnn-vulkan."
+    )
+
+
+def average_visible_rgb(image: Image.Image) -> tuple[int, int, int]:
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    bbox = alpha.getbbox()
+    if not bbox:
+        return (0, 0, 0)
+    cropped = rgba.crop(bbox)
+    pixels = list(cropped.getdata())
+    visible = [pixel for pixel in pixels if pixel[3] > 0]
+    if not visible:
+        return (0, 0, 0)
+    count = len(visible)
+    return (
+        sum(pixel[0] for pixel in visible) // count,
+        sum(pixel[1] for pixel in visible) // count,
+        sum(pixel[2] for pixel in visible) // count,
+    )
+
+
+def prepare_realesrgan_rgb_input(image: Image.Image) -> Image.Image:
+    rgba = image.convert("RGBA")
+    background = Image.new("RGB", rgba.size, average_visible_rgb(rgba))
+    background.paste(rgba.convert("RGB"), mask=rgba.getchannel("A"))
+    return background
+
+
+def apply_alpha_cutoff(image: Image.Image, alpha_cutoff: int) -> Image.Image:
+    rgba = image.convert("RGBA")
+    if alpha_cutoff <= 0:
+        return rgba
+    red, green, blue, alpha = rgba.split()
+    alpha = alpha.point(lambda value: 0 if value <= alpha_cutoff else value)
+    return Image.merge("RGBA", (red, green, blue, alpha))
+
+
+def quantize_rgba(image: Image.Image, color_count: int) -> Image.Image:
+    if color_count >= 256:
+        return image.convert("RGBA")
+    rgba = image.convert("RGBA")
+    try:
+        return rgba.quantize(colors=color_count, method=Image.Quantize.FASTOCTREE).convert("RGBA")
+    except Exception:
+        return rgba
+
+
+def resize_to_scale(image: Image.Image, source_size: tuple[int, int], scale: float) -> Image.Image:
+    rgba = image.convert("RGBA")
+    source_width, source_height = source_size
+    target_width = max(1, round(source_width * scale))
+    target_height = max(1, round(source_height * scale))
+    return rgba.resize((target_width, target_height), LANCZOS)
+
+
+def run_realesrgan_anime(input_path: Path, output_path: Path) -> None:
+    binary = resolve_realesrgan_binary()
+    model_dir = resolve_realesrgan_model_dir(binary)
+    if not binary or not model_dir:
+        raise RuntimeError(realesrgan_missing_message())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    run_process(
+        [
+            binary,
+            "-i",
+            str(input_path),
+            "-o",
+            str(output_path),
+            "-n",
+            REAL_ESRGAN_ANIME_MODEL,
+            "-m",
+            str(model_dir),
+            "-f",
+            "png",
+        ]
+    )
+    if not output_path.exists():
+        raise RuntimeError("Real-ESRGAN anime did not produce an output image")
+
+
+def process_line_cleaner_frames(
+    file_items: list,
+    method: str,
+    scale: float,
+    alpha_cutoff: int,
+    sharpen_percent: int,
+    color_count: int,
+) -> dict:
+    method = method if method in LINE_CLEANER_METHODS else "classic"
+    candidates = []
+    for item in file_items:
+        raw_filename = str(getattr(item, "filename", "") or "frame")
+        display_name = Path(raw_filename.replace("\\", "/")).name or "frame"
+        if not getattr(item, "file", None):
+            continue
+        suffix = Path(display_name).suffix.lower()
+        content_type = str(getattr(item, "type", "") or "")
+        if suffix not in ANIMATION_FRAME_EXTENSIONS and not content_type.startswith("image/"):
+            continue
+        candidates.append((raw_filename, display_name, item))
+
+    candidates.sort(key=lambda pair: natural_sort_key(pair[0]))
+    if not candidates:
+        raise ValueError("no supported image frames found")
+
+    if method == "realesrgan_anime":
+        binary = resolve_realesrgan_binary()
+        if not binary or not resolve_realesrgan_model_dir(binary):
+            raise RuntimeError(realesrgan_missing_message())
+
+    run_id = timestamped_id()
+    root = line_cleaner_dir(run_id)
+    raw_dir = root / "raw"
+    ai_input_dir = root / "ai-input"
+    ai_output_dir = root / "ai-output"
+    processed_dir = root / "processed"
+    for directory in (raw_dir, ai_input_dir, ai_output_dir, processed_dir):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    frames: list[dict] = []
+    total_source_bytes = 0
+    total_processed_bytes = 0
+    max_width = 0
+    max_height = 0
+
+    for index, (_, display_name, item) in enumerate(candidates):
+        frame_name = f"frame_{index + 1:03d}.png"
+        raw_path = raw_dir / frame_name
+        processed_path = processed_dir / frame_name
+
+        with Image.open(item.file) as source_image:
+            source_rgba = source_image.convert("RGBA")
+        source_rgba.save(raw_path, optimize=True, compress_level=9)
+        total_source_bytes += raw_path.stat().st_size
+
+        working = source_rgba
+        if method == "realesrgan_anime":
+            ai_input_path = ai_input_dir / frame_name
+            ai_output_path = ai_output_dir / frame_name
+            prepare_realesrgan_rgb_input(source_rgba).save(ai_input_path)
+            run_realesrgan_anime(ai_input_path, ai_output_path)
+            upscaled_rgb = Image.open(ai_output_path).convert("RGB")
+            upscaled_alpha = source_rgba.getchannel("A").resize(upscaled_rgb.size, LANCZOS)
+            working = Image.merge("RGBA", (*upscaled_rgb.split(), upscaled_alpha))
+
+        resized = resize_to_scale(working, source_rgba.size, scale)
+        cleaned = apply_alpha_cutoff(resized, alpha_cutoff)
+        if sharpen_percent > 0:
+            cleaned = cleaned.filter(ImageFilter.UnsharpMask(radius=1.0, percent=sharpen_percent, threshold=1))
+        cleaned = quantize_rgba(cleaned, color_count)
+        cleaned.save(processed_path, optimize=True, compress_level=9)
+
+        processed_bytes = processed_path.stat().st_size
+        total_processed_bytes += processed_bytes
+        max_width = max(max_width, cleaned.width)
+        max_height = max(max_height, cleaned.height)
+        frames.append(
+            {
+                "index": index,
+                "name": frame_name,
+                "original_name": display_name,
+                "url": f"/work/line-cleaner/{run_id}/processed/{frame_name}",
+                "width": cleaned.width,
+                "height": cleaned.height,
+                "bytes": processed_bytes,
+            }
+        )
+
+    manifest = {
+        "run_id": run_id,
+        "method": method,
+        "model": REAL_ESRGAN_ANIME_MODEL if method == "realesrgan_anime" else "",
+        "scale": scale,
+        "alpha_cutoff": alpha_cutoff,
+        "sharpen_percent": sharpen_percent,
+        "color_count": color_count,
+        "frame_count": len(frames),
+        "source_bytes": total_source_bytes,
+        "processed_bytes": total_processed_bytes,
+        "max_width": max_width,
+        "max_height": max_height,
+        "frames": frames,
+        "created_at": iso_now(),
+    }
+    (root / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    return manifest
+
+
 def save_alpha_mov(
     frame_paths: list[Path],
     frame_sizes: list[tuple[int, int]],
@@ -2508,12 +2912,34 @@ class AppHandler(BaseHTTPRequestHandler):
                 result = import_animation_frames_to_job(field_storage_items(form, "frames"))
                 self.send_json({"ok": True, "job": result})
                 return
+            if parsed.path == "/api/line-cleaner-process":
+                form = cgi.FieldStorage(
+                    fp=self.rfile,
+                    headers=self.headers,
+                    environ={
+                        "REQUEST_METHOD": "POST",
+                        "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                        "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
+                    },
+                )
+                result = process_line_cleaner_frames(
+                    field_storage_items(form, "frames"),
+                    method=str(form.getfirst("method", "classic")),
+                    scale=clamp_float(safe_float(form.getfirst("scale", form.getfirst("output_scale", 0.5)), 0.5), 0.05, 2.0),
+                    alpha_cutoff=clamp_int(safe_int(form.getfirst("alpha_cutoff", 8), 8), 0, 255),
+                    sharpen_percent=clamp_int(safe_int(form.getfirst("sharpen_percent", 80), 80), 0, 300),
+                    color_count=clamp_int(safe_int(form.getfirst("color_count", 128), 128), 2, 256),
+                )
+                self.send_json({"ok": True, "result": result})
+                return
             if parsed.path == "/api/process":
                 payload = self.read_json_body()
                 result = process_video_to_job(
                     upload_id=str(payload.get("upload_id") or ""),
                     start_time=safe_float(payload.get("start_time"), 0.0),
                     end_time=safe_float(payload.get("end_time"), 0.0),
+                    start_frame=safe_int(payload.get("start_frame"), 0),
+                    end_frame=safe_int(payload.get("end_frame"), 0),
                     keep_every=max(1, safe_int(payload.get("keep_every"), 1)),
                     target_size=max(32, safe_int(payload.get("target_size"), 256)),
                     reduce_px=max(0, safe_int(payload.get("reduce_px"), 20)),

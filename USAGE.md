@@ -18,77 +18,23 @@ It works especially well for:
 
 Supported input formats:
 
-- Video: `mp4`, `mov`, `mkv`, `webm`
+- Video / animation: `mp4`, `mov`, `mkv`, `webm`, `gif`
 - Image: `png`, `jpg`, `jpeg`, `webp`, `bmp`
 
 ## Install And Start
 
-### 1. Install The Base Runtime
+Installation is intentionally documented for agents, not for manual human setup. Ask an agent to follow [AGENT_INSTALL.md](./AGENT_INSTALL.md), install the base runtime, ffmpeg, optional AI matting dependencies, and optional Real-ESRGAN line-cleaner tools, then start the local server.
 
-Use Python 3.10 or newer. In the project folder:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-The base runtime is enough for solid-color keying, frame extraction, resizing, alignment, and export. You do not need the AI dependencies unless you want BiRefNet or CorridorKey.
-
-### 2. Install ffmpeg
-
-Video import and extraction need `ffmpeg` and `ffprobe`. The easiest setup is to put both on `PATH`.
-
-If you keep ffmpeg in a standalone folder, point the app to it before launch:
-
-```powershell
-$env:SPRITE_VIDEO_LAB_FFMPEG_DIR="D:\ffmpeg\bin"
-```
-
-### 3. Optional: Install The AI Matting Runtime
-
-To use BiRefNet or CorridorKey, run:
-
-```bat
-setup_ai_runtime.bat
-```
-
-The script installs AI dependencies and prepares CorridorKey when possible. The first AI run may download model files, so it can take longer than later runs.
-
-Useful environment variables:
-
-```bat
-set SPRITE_VIDEO_LAB_AI_MODEL_CACHE=E:\sprite-video-lab-models\huggingface
-set SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT=E:\sprite-video-lab-models\CorridorKey
-set SPRITE_VIDEO_LAB_PYTHON=C:\path\to\python.exe
-```
-
-See [AI_MATTING.md](./AI_MATTING.md) for more AI setup details.
-
-### 4. Start The App
-
-On Windows, run:
-
-```bat
-start_sprite_video_lab.bat
-```
-
-Or start it manually:
-
-```powershell
-python server.py
-```
-
-Default URL:
+Default URL after the agent starts the app:
 
 ```text
 http://127.0.0.1:8894
 ```
 
-To use a different port:
+Experimental line-cleaner page:
 
-```powershell
-python server.py --host 127.0.0.1 --port 8895
+```text
+http://127.0.0.1:8894/app/line-cleaner-experiment.html
 ```
 
 ## The Four-Step Workflow

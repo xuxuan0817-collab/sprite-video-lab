@@ -5,6 +5,7 @@ const state = {
   processPreview: null,
   selected: new Set(),
   segment: { start: 0, end: 0, startFrame: 1, endFrame: 1, confirmed: false },
+  segmentPlaybackRafId: null,
   preview: {
     rafId: null,
     currentIndex: 0,
@@ -32,7 +33,7 @@ const state = {
 
 const els = {};
 const STORAGE_KEY = "sprite-video-lab-session-v2";
-const SUPPORTED_VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm"];
+const SUPPORTED_VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".webm", ".gif"];
 const SUPPORTED_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".webp", ".bmp"];
 const SUPPORTED_UPLOAD_EXTENSIONS = [...SUPPORTED_VIDEO_EXTENSIONS, ...SUPPORTED_IMAGE_EXTENSIONS];
 const AI_RESOLUTION_MIN = 256;
@@ -220,14 +221,10 @@ function bindEvents() {
     const current = els.videoPreview.currentTime || 0;
     els.currentTimeLabel.textContent = `\u5f53\u524d ${formatSeconds(current)}`;
     updateVideoProgress(current);
-    if (
-      state.upload &&
-      state.segment.end > state.segment.start &&
-      current >= Math.max(state.segment.end - 0.01, state.segment.start)
-    ) {
-      restartSegmentPlayback({ autoplay: true });
-    }
   });
+  els.videoPreview.addEventListener("play", startSegmentPlaybackMonitor);
+  els.videoPreview.addEventListener("pause", stopSegmentPlaybackMonitor);
+  els.videoPreview.addEventListener("ended", () => restartSegmentPlayback({ autoplay: true }));
 
   els.manualKeyInput.addEventListener("input", syncManualColorLabel);
   els.matteModeInput.addEventListener("change", updateChromaVisibility);
@@ -716,6 +713,8 @@ function collectFormState() {
     segment: {
       start: Number(state.segment.start || 0),
       end: Number(state.segment.end || 0),
+      startFrame: Number(state.segment.startFrame || 1),
+      endFrame: Number(state.segment.endFrame || 1),
       confirmed: Boolean(state.segment.confirmed),
     },
   };
@@ -726,6 +725,8 @@ function collectProcessingPayload() {
     upload_id: state.upload?.upload_id || "",
     start_time: state.segment.start,
     end_time: state.segment.end,
+    start_frame: state.segment.startFrame,
+    end_frame: state.segment.endFrame,
     keep_every: Number(els.keepEveryInput.value || 1),
     target_size: Number(els.targetSizeInput.value || 128),
     canvas_mode: els.canvasModeInput.value,
@@ -834,7 +835,13 @@ function applyFormState(snapshot) {
   if (snapshot.segment) {
     state.segment.start = Number(snapshot.segment.start || 0);
     state.segment.end = Number(snapshot.segment.end || 0);
-    syncSegmentFramesFromTimes();
+    if (snapshot.segment.startFrame != null && snapshot.segment.endFrame != null) {
+      state.segment.startFrame = Number(snapshot.segment.startFrame || 1);
+      state.segment.endFrame = Number(snapshot.segment.endFrame || 1);
+      syncSegmentTimesFromFrames();
+    } else {
+      syncSegmentFramesFromTimes();
+    }
     state.segment.confirmed = Boolean(snapshot.segment.confirmed);
   }
 
@@ -1176,7 +1183,7 @@ async function uploadSelectedFile(file) {
     return;
   }
   if (!isSupportedUploadFile(file)) {
-    setStatus("\u53EA\u652F\u6301\u89C6\u9891\u6216\u5355\u5F20\u56FE\u7247\uFF1A.mp4 / .mov / .mkv / .webm / .png / .jpg / .jpeg / .webp / .bmp\u3002", "error");
+    setStatus("\u53EA\u652F\u6301\u89C6\u9891\u3001GIF \u52A8\u56FE\u6216\u5355\u5F20\u56FE\u7247\uFF1A.mp4 / .mov / .mkv / .webm / .gif / .png / .jpg / .jpeg / .webp / .bmp\u3002", "error");
     return;
   }
 
@@ -1459,19 +1466,81 @@ function playVideoPreviewMuted() {
   if (playPromise && typeof playPromise.catch === "function") {
     playPromise.catch(() => {});
   }
+  startSegmentPlaybackMonitor();
 }
 
 function restartSegmentPlayback({ autoplay = true } = {}) {
   if (!state.upload || !isVideoUpload() || els.videoPreview.readyState < 1) {
     return;
   }
-  const duration = Math.max(Number(currentUploadInfo().duration || 0), 0);
-  const segmentStart = clamp(Number(state.segment.start || 0), 0, duration);
+  stopSegmentPlaybackMonitor();
+  const segmentStart = getSegmentPlaybackStartTime();
   els.videoPreview.currentTime = segmentStart;
   els.currentTimeLabel.textContent = `\u5f53\u524d ${formatSeconds(segmentStart)}`;
   updateVideoProgress(segmentStart);
   if (autoplay) {
     playVideoPreviewMuted();
+  }
+}
+
+function getSegmentPlaybackStartTime() {
+  if (!state.upload || !isVideoUpload()) {
+    return 0;
+  }
+  const duration = Math.max(Number(currentUploadInfo().duration || 0), 0);
+  const segmentStart = clamp(Number(state.segment.start || 0), 0, duration);
+  const segmentEnd = clamp(Number(state.segment.end || duration), segmentStart, duration);
+  const guard = clamp(getSegmentFrameStep() * 0.1, 0.001, 0.006);
+  return segmentEnd > segmentStart ? Math.min(segmentEnd, segmentStart + guard) : segmentStart;
+}
+
+function getSegmentPlaybackEndTime() {
+  if (!state.upload || !isVideoUpload()) {
+    return 0;
+  }
+  const duration = Math.max(Number(currentUploadInfo().duration || 0), 0);
+  const segmentStart = clamp(Number(state.segment.start || 0), 0, duration);
+  const segmentEnd = clamp(Number(state.segment.end || duration), segmentStart, duration);
+  const frameStep = getSegmentFrameStep();
+  const guard = clamp(frameStep * 0.35, 0.004, 0.02);
+  return Math.max(segmentStart, segmentEnd - guard);
+}
+
+function shouldLoopSegmentPlayback(currentTime = els.videoPreview.currentTime || 0) {
+  return (
+    state.upload &&
+    isVideoUpload() &&
+    state.segment.end > state.segment.start &&
+    Number(currentTime || 0) >= getSegmentPlaybackEndTime()
+  );
+}
+
+function startSegmentPlaybackMonitor() {
+  stopSegmentPlaybackMonitor();
+  if (!state.upload || !isVideoUpload()) {
+    return;
+  }
+  const tick = () => {
+    state.segmentPlaybackRafId = null;
+    if (!state.upload || !isVideoUpload() || els.videoPreview.paused || els.videoPreview.ended) {
+      return;
+    }
+    const current = els.videoPreview.currentTime || 0;
+    els.currentTimeLabel.textContent = `\u5f53\u524d ${formatSeconds(current)}`;
+    updateVideoProgress(current);
+    if (shouldLoopSegmentPlayback(current)) {
+      restartSegmentPlayback({ autoplay: true });
+      return;
+    }
+    state.segmentPlaybackRafId = window.requestAnimationFrame(tick);
+  };
+  state.segmentPlaybackRafId = window.requestAnimationFrame(tick);
+}
+
+function stopSegmentPlaybackMonitor() {
+  if (state.segmentPlaybackRafId != null) {
+    window.cancelAnimationFrame(state.segmentPlaybackRafId);
+    state.segmentPlaybackRafId = null;
   }
 }
 
@@ -1599,7 +1668,11 @@ async function previewCurrentFrame() {
 
   const duration = Number(currentUploadInfo().duration || 0);
   const rawCurrentTime = isImageUpload() ? 0 : Number(els.videoPreview.currentTime || state.segment.start || 0);
-  const sampleTime = clamp(rawCurrentTime, 0, Math.max(duration, 0));
+  const segmentStart = isImageUpload() ? 0 : getSegmentPlaybackStartTime();
+  const segmentEnd = isImageUpload() ? 0 : getSegmentPlaybackEndTime();
+  const sampleTime = isImageUpload()
+    ? 0
+    : clamp(rawCurrentTime, segmentStart, Math.max(segmentStart, segmentEnd));
   const payload = {
     ...collectProcessingPayload(),
     sample_time: sampleTime,

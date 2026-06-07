@@ -4,7 +4,7 @@ Sprite Video Lab 是一个本地网页工具，用来把视频片段、单张图
 
 它适合这些工作流：
 
-- 导入本地视频、图片或动画序列帧。
+- 导入本地视频、GIF 动图、图片或动画序列帧。
 - 截取有用的帧范围。
 - 按固定间隔抽帧。
 - 去除纯色背景、绿幕/蓝幕背景或 AI 生成背景。
@@ -28,7 +28,9 @@ Sprite Video Lab 是一个本地网页工具，用来把视频片段、单张图
 - 主体保护预设，减少 BiRefNet/Luma 把主体内部抠成半透明的问题。
 - 单帧预览支持原始抽帧全分辨率查看，处理后预览可切换棋盘格或指定纯色背景。
 - 预览和批处理后处理：残绿涂黑、半透明像素涂黑。
+- BiRefNet 弱蒙版会自动回退到 general 模型，避免小尺寸插画/GIF 被抠成全透明。
 - 可直接导入已有动画序列帧，按文件名顺序预览和导出。
+- 实验性线稿清理页：支持 Lanczos 缩小和 Real-ESRGAN anime 整线后缩小。
 - 反向动画预览和反向导出。
 - 帧选择、动画预览、Sprite Sheet 导出、zip 导出和 JSON manifest 导出。
 
@@ -64,79 +66,23 @@ Sprite Video Lab 目前提供这些背景处理模式：
 
 基础功能只需要 `requirements.txt`。BiRefNet、Luma 组合和 CorridorKey 相关能力需要 `requirements-ai.txt` 里的可选依赖。
 
-## 快速开始
+## 安装
 
-### 1. 克隆项目
+安装交给 agent 执行，避免手动配置 Python、ffmpeg、AI 依赖和模型缓存时出错。
 
-```bash
-git clone https://github.com/sparklecatta-lang/sprite-video-lab.git
-cd sprite-video-lab
-```
+- Agent 安装说明：[AGENT_INSTALL.md](./AGENT_INSTALL.md)
+- AI 抠图细节：[AI_MATTING.md](./AI_MATTING.md)
 
-### 2. 安装基础依赖
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 3. 安装 ffmpeg
-
-把 `ffmpeg` 和 `ffprobe` 放到 `PATH`。
-
-如果你使用独立 ffmpeg 目录，可以这样指定：
-
-```powershell
-$env:SPRITE_VIDEO_LAB_FFMPEG_DIR="D:\ffmpeg\bin"
-```
-
-### 4. 可选：安装 AI 抠图环境
-
-Windows 下运行：
-
-```bat
-setup_ai_runtime.bat
-```
-
-脚本会创建单独的 AI Python 环境，并安装 BiRefNet 和 CorridorKey 所需依赖。模型缓存目录可以这样覆盖：
-
-```bat
-set SPRITE_VIDEO_LAB_AI_MODEL_CACHE=<model-cache-dir>
-```
-
-CorridorKey 源码和 checkpoint 目录可以这样覆盖：
-
-```bat
-set SPRITE_VIDEO_LAB_CORRIDORKEY_ROOT=<corridorkey-dir>
-```
-
-也可以指定服务启动时使用的 Python：
-
-```bat
-set SPRITE_VIDEO_LAB_PYTHON=<python-runtime>
-```
-
-更多说明见 [AI_MATTING.md](./AI_MATTING.md)。
-
-### 5. 启动
-
-Windows 下直接运行：
-
-```bat
-start_sprite_video_lab.bat
-```
-
-或在终端运行：
-
-```bash
-python server.py
-```
-
-默认地址：
+安装完成后，agent 应启动本地服务并给出访问地址。默认地址：
 
 ```text
 http://127.0.0.1:8894
+```
+
+实验性线稿清理页：
+
+```text
+http://127.0.0.1:8894/app/line-cleaner-experiment.html
 ```
 
 ## 使用说明
@@ -162,6 +108,10 @@ http://127.0.0.1:8894
   - 可选，CorridorKey checkout 和 checkpoint 目录
 - `SPRITE_VIDEO_LAB_PYTHON`
   - 可选，启动器使用的 Python 可执行文件
+- `SPRITE_VIDEO_LAB_REALESRGAN_BIN`
+  - 可选，Real-ESRGAN anime 线稿清理使用的 `realesrgan-ncnn-vulkan` 可执行文件
+- `SPRITE_VIDEO_LAB_REALESRGAN_MODEL_DIR`
+  - 可选，包含 `realesrgan-x4plus-anime.param` 和 `.bin` 的模型目录
 
 也可以从命令行覆盖 host 和 port：
 
@@ -173,7 +123,9 @@ python server.py --host 127.0.0.1 --port 8894
 
 ```text
 app/                              前端 UI 和浏览器逻辑
+app/line-cleaner-experiment.*     实验性线稿缩小清理页面
 server.py                         本地 HTTP 服务和处理流水线
+AGENT_INSTALL.md                  给 agent 执行的安装和启动说明
 requirements.txt                  基础运行依赖
 requirements-ai.txt               可选 AI 抠图依赖
 setup_ai_runtime.bat              Windows AI 环境安装脚本
