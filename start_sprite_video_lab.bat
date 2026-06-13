@@ -35,10 +35,14 @@ echo Python not found.
 exit /b 1
 
 :python_ready
+set "SPRITE_VIDEO_LAB_PYTHON=%PYTHON_EXE%"
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "$serverPath = [System.IO.Path]::GetFullPath('%~dp0server.py');" ^
   "$escaped = [Regex]::Escape($serverPath);" ^
-  "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -and $_.CommandLine -match $escaped } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} }"
+  "$self = $PID;" ^
+  "$port = [int]'%SPRITE_VIDEO_LAB_PORT%';" ^
+  "Get-CimInstance Win32_Process | Where-Object { $_.ProcessId -ne $self -and $_.CommandLine -and $_.CommandLine -match $escaped } | ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction Stop } catch {} };" ^
+  "Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue | ForEach-Object { $ownerPid = $_.OwningProcess; $proc = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessId -eq $ownerPid }; if ($proc.CommandLine -and $proc.CommandLine -match 'server\.py' -and ($proc.CommandLine -match 'sprite-video-lab' -or $proc.CommandLine -match 'SVL')) { try { Stop-Process -Id $ownerPid -Force -ErrorAction Stop } catch {} } }"
 
 start "Sprite Video Lab Server" "%PYTHON_EXE%" "%~dp0server.py" --serve --host "%SPRITE_VIDEO_LAB_HOST%" --port "%SPRITE_VIDEO_LAB_PORT%"
 timeout /t 2 >nul

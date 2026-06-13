@@ -7,548 +7,584 @@
   <link rel="stylesheet" href="/app/styles.css">
 </head>
 <body>
-  <div class="page-shell">
-    <header class="hero">
-      <div class="hero-main">
-        <p class="eyebrow">Sprite Video Lab</p>
-        <h1>&#x89C6;&#x9891;&#x8F6C; Sprite &#x5E27;&#x5DE5;&#x4F5C;&#x53F0;</h1>
-        <p class="hero-copy">&#x5BFC;&#x5165;&#x672C;&#x5730;&#x89C6;&#x9891;&#x6216;&#x5355;&#x5F20;&#x56FE;&#x7247;&#xFF0C;&#x5148;&#x5728;&#x8FD9;&#x4E2A;&#x5DE5;&#x4F5C;&#x53F0;&#x91CC;&#x9884;&#x89C8;&#x3001;&#x88C1;&#x533A;&#x3001;&#x62A0;&#x80CC;&#x666F;&#x3001;&#x7EDF;&#x4E00;&#x843D;&#x70B9;&#x4E0E;&#x5C3A;&#x5BF8;&#xFF0C;&#x6700;&#x540E;&#x5BFC;&#x51FA;&#x6210;&#x7A33;&#x5B9A;&#x7684;&#x900F;&#x660E; PNG Sprite &#x5E27;&#x3002;</p>
-        <div class="hero-pill-row">
-          <span class="hero-pill">Video + Image Input</span>
-          <span class="hero-pill">Green Screen Cleanup</span>
-          <span class="hero-pill">Pixel Sprite Workflow</span>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <div>
+          <p class="eyebrow">Sprite Video Lab</p>
+          <h1>Sprite 资产处理台</h1>
         </div>
       </div>
-      <div class="hero-status">
-        <span class="status-chip">&#x672C;&#x5730;&#x8FD0;&#x884C; / Design Workbench</span>
-        <div class="hero-stat-grid">
-          <div class="hero-stat">
-            <span>Input</span>
-            <strong>&#x89C6;&#x9891; + &#x5355;&#x56FE;</strong>
-          </div>
-          <div class="hero-stat">
-            <span>Preview</span>
-            <strong>&#x6240;&#x89C1;&#x5373;&#x6240;&#x5F97;</strong>
-          </div>
-          <div class="hero-stat">
-            <span>Cleanup</span>
-            <strong>&#x6290;&#x7EFF;&#x5E55; / &#x6536; Halo</strong>
-          </div>
-          <div class="hero-stat">
-            <span>Output</span>
-            <strong>Transparent PNG</strong>
-          </div>
+      <div class="source-strip" aria-label="当前素材状态">
+        <div>
+          <span>素材</span>
+          <strong id="videoName">未导入</strong>
         </div>
-        <p class="hero-note">&#x9002;&#x5408;&#x628A; AI &#x89D2;&#x8272;&#x7EFF;&#x5E55;&#x89C6;&#x9891;&#x6216;&#x7D20;&#x6750;&#x56FE;&#xFF0C;&#x6574;&#x7406;&#x6210;&#x7A33;&#x5B9A;&#x53EF;&#x7528;&#x7684; Sprite &#x8D44;&#x4EA7;&#x3002;</p>
+        <div>
+          <span>尺寸</span>
+          <strong id="videoSize">-</strong>
+        </div>
+        <div>
+          <span>帧率</span>
+          <strong id="videoFps">-</strong>
+        </div>
+        <div>
+          <span>时长</span>
+          <strong id="videoDuration">-</strong>
+        </div>
       </div>
     </header>
 
-    <main class="layout">
-      <section class="panel panel-wide">
-        <div class="panel-head">
-          <div>
-            <h2>1. &#x5BFC;&#x5165;&#x7D20;&#x6750;</h2>
-            <p>&#x652F;&#x6301;&#x89C6;&#x9891;&#x6216;&#x5355;&#x5F20;&#x56FE;&#x7247;&#x3002;&#x53EF;&#x4EE5;&#x7528;&#x7EDD;&#x5BF9;&#x8DEF;&#x5F84;&#x8F7D;&#x5165;&#xFF0C;&#x4E5F;&#x53EF;&#x4EE5;&#x76F4;&#x63A5;&#x62D6;&#x5165;&#x5230;&#x4E0B;&#x65B9;&#x5DE5;&#x4F5C;&#x533A;&#x3002;</p>
-          </div>
-        </div>
+    <div class="workspace">
+      <aside class="workflow-rail" aria-label="工作流">
+        <a href="#importSection" class="rail-item active">
+          <span class="rail-index">01</span>
+          <span>导入</span>
+        </a>
+        <a href="#previewPanel" class="rail-item">
+          <span class="rail-index">02</span>
+          <span>截取</span>
+        </a>
+        <a href="#processPanel" class="rail-item">
+          <span class="rail-index">03</span>
+          <span>抠图算法</span>
+        </a>
+        <a href="#resultPanel" class="rail-item">
+          <span class="rail-index">04</span>
+          <span>检查导出</span>
+        </a>
+      </aside>
 
-        <div class="import-stack">
-          <div class="inline-form">
-            <label class="field grow">
-              <span>&#x672C;&#x5730;&#x89C6;&#x9891;/&#x56FE;&#x7247;&#x8DEF;&#x5F84;</span>
-              <input id="pathInput" type="text" placeholder="&#x4F8B;&#x5982;&#xFF1A;D:\media\hero.mp4 &#x6216; hero.png">
-            </label>
-            <button id="importPathButton" class="primary-button" type="button">&#x5BFC;&#x5165;&#x8DEF;&#x5F84;</button>
-          </div>
-
-          <div class="upload-form">
-            <label
-              id="uploadDropzone"
-              class="upload-dropzone"
-              for="uploadInput"
-              tabindex="0"
-              role="button"
-              aria-controls="uploadInput"
-              aria-busy="false"
-            >
-              <span class="upload-dropzone-title">&#x62D6;&#x52A8;&#x89C6;&#x9891;&#x3001;GIF &#x52A8;&#x56FE;&#x6216;&#x5355;&#x5F20;&#x56FE;&#x7247;&#x5230;&#x8FD9;&#x91CC;</span>
-              <span class="upload-dropzone-hint">&#x6216;&#x70B9;&#x51FB;&#x9009;&#x62E9;&#x6587;&#x4EF6;&#x540E;&#x7ACB;&#x5373;&#x8F7D;&#x5165;</span>
-              <span class="upload-dropzone-types">.mp4 / .mov / .mkv / .webm / .gif / .png / .jpg / .jpeg / .webp / .bmp</span>
-            </label>
-            <input id="uploadInput" type="file" accept=".mp4,.mov,.mkv,.webm,.gif,.png,.jpg,.jpeg,.webp,.bmp,video/*,image/*">
-            <p class="subtle">&#x5982;&#x679C;&#x6587;&#x4EF6;&#x5DF2;&#x7ECF;&#x5728;&#x672C;&#x673A;&#x78C1;&#x76D8;&#x4E0A;&#xFF0C;&#x4F18;&#x5148;&#x7528;&#x201C;&#x5BFC;&#x5165;&#x8DEF;&#x5F84;&#x201D;&#x3002;</p>
-          </div>
-        </div>
-
-        <div class="meta-grid empty-meta">
-          <div class="meta-card">
-            <span class="meta-label">&#x5F53;&#x524D;&#x89C6;&#x9891;</span>
-            <strong id="videoName">&#x672A;&#x5BFC;&#x5165;</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">&#x5206;&#x8FA8;&#x7387;</span>
-            <strong id="videoSize">-</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">&#x5E27;&#x7387;</span>
-            <strong id="videoFps">-</strong>
-          </div>
-          <div class="meta-card">
-            <span class="meta-label">&#x65F6;&#x957F;</span>
-            <strong id="videoDuration">-</strong>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel panel-wide" id="previewPanel" hidden>
-        <div class="panel-head">
-          <div>
-            <h2>2. &#x9884;&#x89C8;&#x4E0E;&#x622A;&#x53D6;&#x533A;&#x95F4;</h2>
-            <p>&#x62D6;&#x52A8;&#x8D77;&#x70B9;&#x548C;&#x7EC8;&#x70B9;&#x65F6;&#xFF0C;&#x5DE6;&#x4FA7;&#x89C6;&#x9891;&#x4F1A;&#x7ACB;&#x5373;&#x8DF3;&#x56DE;&#x9009;&#x533A;&#x8D77;&#x70B9;&#x5E76;&#x5FAA;&#x73AF;&#x64AD;&#x653E;&#x3002;&#x5355;&#x5F20;&#x56FE;&#x7247;&#x4F1A;&#x81EA;&#x52A8;&#x8FDB;&#x5165;&#x5355;&#x5E27;&#x6A21;&#x5F0F;&#x3002;</p>
-          </div>
-        </div>
-
-        <div class="preview-grid">
-          <div class="video-wrap">
-            <video id="videoPreview" playsinline muted></video>
-            <img id="mediaPreviewImage" alt="source image preview" hidden>
-            <div id="videoProgress" class="video-progress" aria-hidden="true">
-              <div id="videoProgressFill" class="video-progress-fill"></div>
+      <main class="main-grid">
+        <section id="importSection" class="panel import-panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Input</p>
+              <h2>导入源素材</h2>
             </div>
-            <div id="videoToolbar" class="video-toolbar">
-              <span class="segment-mode-chip">&#x81EA;&#x52A8;&#x5FAA;&#x73AF;&#x5F53;&#x524D;&#x9009;&#x533A; / &#x81EA;&#x52A8;&#x9759;&#x97F3;</span>
-              <span id="currentTimeLabel" class="time-chip">&#x5F53;&#x524D; 0.00s</span>
+            <span class="section-note">支持视频、GIF、单图和图片序列</span>
+          </div>
+
+          <div class="import-grid">
+            <div class="path-card">
+              <label class="field">
+                <span>本地路径</span>
+                <input id="pathInput" type="text" placeholder="D:\media\character_take_01.mp4">
+              </label>
+              <button id="importPathButton" class="primary-button" type="button">导入路径</button>
+            </div>
+
+            <div class="upload-form">
+              <label
+                id="uploadDropzone"
+                class="upload-dropzone"
+                for="uploadInput"
+                tabindex="0"
+                role="button"
+                aria-controls="uploadInput"
+                aria-busy="false"
+              >
+                <span class="upload-dropzone-title">拖入文件或点击选择</span>
+                <span class="upload-dropzone-hint">多图会按文件名顺序组成帧序列</span>
+                <span class="upload-dropzone-types">MP4 / MOV / MKV / WebM / GIF / PNG / JPG / WebP / BMP</span>
+              </label>
+              <input id="uploadInput" type="file" accept=".mp4,.mov,.mkv,.webm,.gif,.png,.jpg,.jpeg,.webp,.bmp,video/*,image/*" multiple>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel media-panel" id="previewPanel" hidden>
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Timeline</p>
+              <h2>源画面与截取区间</h2>
+            </div>
+            <div class="preview-head-actions">
+              <span id="currentTimeLabel" class="time-chip">当前 0.00s</span>
+              <a class="primary-button small-link" href="#processPanel">选择抠图算法</a>
             </div>
           </div>
 
-          <div class="segment-panel">
-            <label class="field">
-              <span>&#x8D77;&#x59CB;&#x5E27;</span>
-              <div class="time-control">
-                <input id="startRange" type="range" min="0" max="1" step="0.01" value="0">
-                <div class="time-number-shell">
-                  <input id="startInput" type="text" inputmode="numeric" value="1">
-                  <div class="time-step-buttons">
-                    <button id="startStepUpButton" class="time-step-button" type="button" aria-label="Start plus one frame">&#9650;</button>
-                    <button id="startStepDownButton" class="time-step-button" type="button" aria-label="Start minus one frame">&#9660;</button>
-                  </div>
-                </div>
+          <div class="preview-layout">
+            <div class="video-wrap">
+              <video id="videoPreview" playsinline muted></video>
+              <img id="mediaPreviewImage" alt="源图预览" hidden>
+              <div id="videoProgress" class="video-progress" aria-hidden="true">
+                <div id="videoProgressFill" class="video-progress-fill"></div>
               </div>
-            </label>
-
-            <label class="field">
-              <span>&#x7ED3;&#x675F;&#x5E27;</span>
-              <div class="time-control">
-                <input id="endRange" type="range" min="0" max="1" step="0.01" value="1">
-                <div class="time-number-shell">
-                  <input id="endInput" type="text" inputmode="numeric" value="1">
-                  <div class="time-step-buttons">
-                    <button id="endStepUpButton" class="time-step-button" type="button" aria-label="End plus one frame">&#9650;</button>
-                    <button id="endStepDownButton" class="time-step-button" type="button" aria-label="End minus one frame">&#9660;</button>
-                  </div>
-                </div>
-              </div>
-            </label>
-
-            <div class="segment-summary">
-              <span>&#x9009;&#x4E2D;&#x5E27;&#x6570;</span>
-              <strong id="segmentLength">0 &#x5E27;</strong>
-            </div>
-
-            <div class="segment-confirm-bar">
-              <div class="segment-confirm-meta">
-                <span id="segmentConfirmStatus" class="segment-status confirmed">&#x5F53;&#x524D;&#x9009;&#x533A;&#x4F1A;&#x5B9E;&#x65F6;&#x751F;&#x6548;</span>
-                <small id="segmentConfirmHint">&#x4E0D;&#x7528;&#x518D;&#x70B9;&#x201C;&#x786E;&#x5B9A;&#x9009;&#x533A;&#x201D;&#x3002;&#x8C03;&#x6574;&#x6ED1;&#x6746;&#x540E;&#xFF0C;&#x7B2C; 3 &#x6B65;&#x4F1A;&#x76F4;&#x63A5;&#x4F7F;&#x7528;&#x65B0;&#x7684;&#x65F6;&#x95F4;&#x8303;&#x56F4;&#x3002;</small>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section class="panel panel-wide" id="processPanel" hidden>
-        <div class="panel-head">
-          <div>
-            <h2>3. &#x62BD;&#x5E27;&#x4E0E;&#x62A0;&#x56FE;</h2>
-            <p>&#x8FD9;&#x91CC;&#x7684;&#x53C2;&#x6570;&#x4F1A;&#x51B3;&#x5B9A;&#x62BD;&#x5E27;&#x5BC6;&#x5EA6;&#x3001;&#x900F;&#x660E;&#x8FB9;&#x7F18;&#x3001;&#x7F29;&#x653E;&#x548C;&#x89D2;&#x8272;&#x843D;&#x5730;&#x4F4D;&#x7F6E;&#x3002;</p>
-          </div>
-          <div class="step-lock-note" id="processLockNote">&#x5148;&#x56DE;&#x5230;&#x7B2C; 2 &#x6B65;&#x786E;&#x5B9A;&#x9009;&#x533A;&#xFF0C;&#x518D;&#x8FDB;&#x884C;&#x5355;&#x5E27;&#x9884;&#x89C8;&#x548C;&#x6574;&#x6BB5;&#x5904;&#x7406;&#x3002;</div>
-        </div>
-
-        <div class="process-step-shell" id="processStepShell">
-        <div class="form-grid">
-          <label class="field">
-            <span>&#x4FDD;&#x7559;&#x6BCF; N &#x5E27;</span>
-            <input id="keepEveryInput" type="number" min="1" step="1" value="2">
-            <small>1 = &#x5168;&#x4FDD;&#x7559;&#xFF0C;2 = &#x9694;&#x4E00;&#x5E27;&#xFF0C;3 = &#x6BCF;&#x4E09;&#x5E27;&#x4FDD;&#x7559;&#x4E00;&#x5F20;&#x3002;</small>
-          </label>
-
-          <label class="field">
-            <span>&#x76EE;&#x6807;&#x9AD8;&#x5EA6;</span>
-            <input id="targetSizeInput" type="number" min="32" step="1" value="128">
-            <small>&#x81EA;&#x52A8;&#x5BBD;&#x5EA6;&#x6A21;&#x5F0F;&#x4E0B;&#x8FD9;&#x662F;&#x8F93;&#x51FA;&#x9AD8;&#x5EA6;&#xFF0C;&#x65B9;&#x5F62;&#x6A21;&#x5F0F;&#x4E0B;&#x662F;&#x753B;&#x5E03;&#x5C3A;&#x5BF8;&#x3002;</small>
-          </label>
-
-          <label class="field">
-            <span>&#x753B;&#x5E03;&#x5E03;&#x5C40;</span>
-            <select id="canvasModeInput">
-              <option value="auto">&#x81EA;&#x52A8;&#x5BBD;&#x5EA6;&#xFF0C;&#x5C45;&#x4E2D;</option>
-              <option value="square_bottom">&#x65B9;&#x5F62;&#x753B;&#x5E03;&#xFF0C;&#x5E95;&#x90E8;&#x5BF9;&#x9F50;</option>
-              <option value="square_center">&#x65B9;&#x5F62;&#x753B;&#x5E03;&#xFF0C;&#x5C45;&#x4E2D;</option>
-            </select>
-            <small>&#x6A2A;&#x5411;&#x957F;&#x6761;&#x6216;&#x8FDE;&#x62DB;&#x5E8F;&#x5217;&#x7528;&#x81EA;&#x52A8;&#x5BBD;&#x5EA6;&#x3002;</small>
-          </label>
-
-          <label class="field">
-            <span>&#x753B;&#x5E03;&#x8FB9;&#x8DDD;</span>
-            <input id="reducePxInput" type="number" min="0" step="1" value="12">
-            <small>&#x81EA;&#x52A8;&#x5BBD;&#x5EA6;&#x65F6;&#x4F5C;&#x4E3A;&#x56DB;&#x5468;&#x8FB9;&#x8DDD;&#xFF0C;&#x5E95;&#x90E8;&#x5BF9;&#x9F50;&#x65F6;&#x4F5C;&#x4E3A;&#x843D;&#x5730;&#x8FB9;&#x8DDD;&#x3002;</small>
-          </label>
-
-          <label class="field">
-            <span>&#x542F;&#x7528;&#x62A0;&#x80CC;&#x666F;</span>
-            <label class="checkbox-row">
-              <input id="chromaEnabledInput" type="checkbox" checked>
-              <span>&#x5220;&#x9664;&#x80CC;&#x666F;&#x5E76;&#x8F93;&#x51FA;&#x900F;&#x660E; PNG</span>
-            </label>
-          </label>
-
-          <label class="field">
-            <span>&#x62A0;&#x56FE;&#x6A21;&#x5F0F;</span>
-            <select id="matteModeInput">
-              <option value="chroma">&#x6211;&#x7684;&#x7EFF;&#x5E55;&#x62A0;&#x56FE;&#x7B97;&#x6CD5;</option>
-              <option value="birefnet">&#x53EA;&#x7528; BiRefNet</option>
-              <option value="corridorkey">&#x53EA;&#x7528; CorridorKey</option>
-              <option value="luma">&#x53EA;&#x7528; Luma</option>
-              <option value="birefnet_corridorkey">BiRefNet &#x7C97;&#x8499;&#x7248; / CorridorKey &#x7CBE;&#x4FEE;&#x8FB9;&#x7F18;</option>
-              <option value="birefnet_corridorkey_key">BiRefNet &#x540E;&#x518D;&#x7528; CorridorKey &#x6536;&#x7D27;&#x62A0;&#x56FE;</option>
-              <option value="birefnet_luma">BiRefNet &#x4FDD;&#x4E3B;&#x4F53; / Luma &#x8865;&#x4EAE;&#x90E8;</option>
-              <option value="birefnet_luma_key">BiRefNet &#x540E;&#x518D;&#x7528; Luma &#x6536;&#x7D27;&#x62A0;&#x56FE;</option>
-              <option value="birefnet_luma_corridorkey">BiRefNet + Luma &#x5408;&#x5E76;&#x540E; / CorridorKey &#x7CBE;&#x4FEE;</option>
-              <option value="none">&#x4E0D;&#x62A0;&#x56FE;&#xFF0C;&#x53EA;&#x7F29;&#x653E;&#x5BF9;&#x9F50;</option>
-            </select>
-            <small>&#x201C;&#x7CBE;&#x4FEE;&#x201D;&#x4F1A;&#x5141;&#x8BB8;&#x4E0B;&#x4E00;&#x6B65;&#x8865;&#x8FB9;&#xFF1B;&#x201C;&#x6536;&#x7D27;&#x201D;&#x53EA;&#x4F1A;&#x8FDB;&#x4E00;&#x6B65;&#x5220;&#x6389;&#x80CC;&#x666F;&#x3002;</small>
-          </label>
-
-          <label class="field">
-            <span>&#x62A0;&#x56FE;&#x53D6;&#x8272;&#x65B9;&#x5F0F;</span>
-            <select id="keyModeInput">
-              <option value="auto">&#x81EA;&#x52A8;&#x8BC6;&#x522B;&#x56DB;&#x89D2;&#x5E73;&#x5747;&#x8272;</option>
-              <option value="manual">&#x624B;&#x52A8;&#x6307;&#x5B9A;&#x989C;&#x8272;</option>
-            </select>
-          </label>
-
-          <label class="field" id="manualColorField">
-            <span>&#x624B;&#x52A8;&#x80CC;&#x666F;&#x8272;</span>
-            <div class="color-row">
-              <input id="manualKeyInput" type="color" value="#00ff00">
-              <code id="manualKeyLabel">#00FF00</code>
-            </div>
-          </label>
-
-          <label class="field chroma-only">
-            <span>&#x62A0;&#x56FE;&#x9608;&#x503C;</span>
-            <input id="thresholdInput" type="number" min="0" step="1" value="82">
-            <small>&#x8D8A;&#x5927;&#x62A0;&#x5F97;&#x8D8A;&#x72E0;&#xFF0C;&#x4EBA;&#x7269;&#x8FB9;&#x7F18;&#x4E5F;&#x66F4;&#x5BB9;&#x6613;&#x88AB;&#x5403;&#x6389;&#x3002;</small>
-          </label>
-
-          <label class="field chroma-only">
-            <span>&#x8F6F;&#x8FB9;&#x8FC7;&#x6E21;</span>
-            <input id="softnessInput" type="number" min="0" step="1" value="34">
-            <small>&#x63A7;&#x5236;&#x900F;&#x660E;&#x8FB9;&#x7F18;&#x7684;&#x8FC7;&#x6E21;&#x5BBD;&#x5EA6;&#x3002;</small>
-          </label>
-
-          <label class="field spill-matte-only">
-            <span>&#x53BB;&#x8272;&#x6EA2;&#x51FA;&#x5F3A;&#x5EA6;</span>
-            <input id="despillInput" type="number" min="0" max="2.5" step="0.05" value="0.85">
-            <small>&#x7EAF;&#x8272;&#x62A0;&#x56FE;&#x548C; AI &#x62A0;&#x56FE;&#x90FD;&#x4F1A;&#x7528;&#x5B83;&#x6E05;&#x7406;&#x7EFF;&#x8FB9;&#x3002;</small>
-          </label>
-
-          <label class="field spill-matte-only">
-            <span>Halo &#x6536;&#x7F29;&#x50CF;&#x7D20;</span>
-            <input id="haloInput" type="number" min="0" step="1" value="1">
-            <small>AI &#x6A21;&#x5F0F;&#x4E0B;&#x4F1A;&#x6536;&#x7F29;&#x667A;&#x80FD;&#x8499;&#x7248;&#xFF0C;&#x51CF;&#x5C11;&#x8FB9;&#x7F18;&#x6B8B;&#x8272;&#x3002;</small>
-          </label>
-
-          <label class="field corridor-capable-only" hidden>
-            <span>CorridorKey &#x7CBE;&#x4FEE;</span>
-            <label class="checkbox-row">
-              <input id="corridorEnabledInput" type="checkbox">
-              <span>&#x7528;&#x795E;&#x7ECF;&#x7F51;&#x7EDC;&#x91CD;&#x5EFA;&#x524D;&#x666F;&#x989C;&#x8272;&#x548C;&#x8FB9;&#x7F18; alpha</span>
-            </label>
-          </label>
-
-          <label class="field corridor-key-only">
-            <span>&#x8272;&#x5E55;&#x7C7B;&#x578B;</span>
-            <select id="corridorScreenInput">
-              <option value="auto">&#x81EA;&#x52A8;</option>
-              <option value="green">&#x7EFF;&#x5E55;</option>
-              <option value="blue">&#x84DD;&#x5E55;</option>
-            </select>
-            <small>&#x81EA;&#x52A8;&#x4F1A;&#x6839;&#x636E;&#x80CC;&#x666F;&#x53D6;&#x8272;&#x9009;&#x62E9;&#x6A21;&#x578B;&#x3002;</small>
-          </label>
-
-          <label class="field ai-matte-only">
-            <span>BiRefNet &#x6A21;&#x578B;</span>
-            <select id="aiModelInput">
-              <option value="birefnet-hr-matting">HR-matting &#xFF08;&#x8D28;&#x91CF;&#x4F18;&#x5148;&#xFF09;</option>
-              <option value="birefnet-lite-2k">lite-2K &#xFF08;&#x66F4;&#x8F7B;&#xFF09;</option>
-              <option value="birefnet-general">General</option>
-            </select>
-            <small>&#x901A;&#x5E38;&#x4FDD;&#x6301; HR-matting&#xFF0C;&#x5185;&#x5B58;&#x7D27;&#x5F20;&#x65F6;&#x6362;&#x7528; lite-2K&#x3002;</small>
-          </label>
-
-          <label class="field ai-matte-only">
-            <span>AI &#x8FD0;&#x884C;&#x65B9;&#x5F0F;</span>
-            <select id="aiDeviceInput">
-              <option value="auto">&#x81EA;&#x52A8;&#x9009;&#x62E9;</option>
-              <option value="cuda">&#x9AD8;&#x6027;&#x80FD;&#x6A21;&#x5F0F;</option>
-              <option value="cpu">&#x517C;&#x5BB9;&#x6A21;&#x5F0F;</option>
-            </select>
-            <small>&#x901A;&#x5E38;&#x4FDD;&#x6301;&#x81EA;&#x52A8;&#x5373;&#x53EF;&#x3002;</small>
-          </label>
-
-          <label class="field ai-matte-only">
-            <span>AI &#x8FB9;&#x7F18;&#x7CBE;&#x7EC6;&#x5EA6;</span>
-            <input id="aiResolutionInput" type="number" min="256" max="2560" step="32" value="1024">
-            <small>&#x8D8A;&#x5927;&#x8FB9;&#x7F18;&#x8D8A;&#x7EC6;&#xFF0C;&#x4F46;&#x5904;&#x7406;&#x4F1A;&#x66F4;&#x6162;&#x3002;</small>
-          </label>
-
-          <div class="field ai-matte-only luma-preset-field">
-            <span>&#x4E3B;&#x4F53;&#x4FDD;&#x62A4;&#x9884;&#x8BBE;</span>
-            <div class="preset-button-row">
-              <button class="ghost-button compact-button" type="button" data-luma-preset="soft">&#x6E29;&#x548C;</button>
-              <button class="ghost-button compact-button" type="button" data-luma-preset="balanced">&#x4E2D;&#x7B49;</button>
-              <button class="ghost-button compact-button" type="button" data-luma-preset="strong">&#x5F3A;&#x529B;</button>
-            </div>
-            <small>&#x7528;&#x4E8E;&#x9632;&#x6B62;&#x5EFA;&#x7B51;&#x5185;&#x90E8;&#x88AB;&#x62A0;&#x6210;&#x534A;&#x900F;&#x660E;&#xFF0C;&#x4F1A;&#x81EA;&#x52A8;&#x5173;&#x95ED; CorridorKey &#x5E76;&#x628A; Halo &#x8BBE;&#x4E3A; 0&#x3002;</small>
-          </div>
-
-          <div class="field">
-            <span>&#x6279;&#x5904;&#x7406;&#x540E;&#x5904;&#x7406;</span>
-            <label class="checkbox-row">
-              <input id="batchGreenToBlackInput" type="checkbox">
-              <span>&#x6B8B;&#x7EFF;&#x6D82;&#x9ED1;</span>
-            </label>
-            <label class="checkbox-row">
-              <input id="batchSemiTransparentToBlackInput" type="checkbox">
-              <span>&#x534A;&#x900F;&#x6D82;&#x9ED1;&#xFF08;&#x4FDD;&#x7559; alpha&#xFF09;</span>
-            </label>
-            <label class="checkbox-row">
-              <input id="batchSemiTransparentToOpaqueInput" type="checkbox">
-              <span>&#x534A;&#x900F;&#x989C;&#x8272;&#x53D8;&#x4E0D;&#x900F;&#x660E;</span>
-            </label>
-            <small>&#x70B9;&#x201C;&#x5F00;&#x59CB;&#x5904;&#x7406;&#x201D;&#x65F6;&#x4F1A;&#x5957;&#x7528;&#x5230;&#x6BCF;&#x4E00;&#x5E27;&#x8F93;&#x51FA;&#x56FE;&#x3002;</small>
-          </div>
-
-          <label class="field luma-matte-only">
-            <span>Luma &#x9ED1;&#x573A;</span>
-            <input id="lumaBlackInput" type="number" min="0" max="254" step="1" value="24">
-            <small>&#x4F4E;&#x4E8E;&#x8FD9;&#x4E2A;&#x4EAE;&#x5EA6;&#x7684;&#x50CF;&#x7D20;&#x4F1A;&#x8D8B;&#x5411;&#x900F;&#x660E;&#x3002;</small>
-          </label>
-
-          <label class="field luma-matte-only">
-            <span>Luma &#x767D;&#x573A;</span>
-            <input id="lumaWhiteInput" type="number" min="1" max="255" step="1" value="230">
-            <small>&#x8FBE;&#x5230;&#x8FD9;&#x4E2A;&#x4EAE;&#x5EA6;&#x7684;&#x50CF;&#x7D20;&#x4F1A;&#x8D8B;&#x5411;&#x4E0D;&#x900F;&#x660E;&#x3002;</small>
-          </label>
-
-          <label class="field luma-matte-only">
-            <span>Luma Gamma</span>
-            <input id="lumaGammaInput" type="number" min="0.05" max="4" step="0.05" value="1">
-            <small>&#x8C03;&#x6574;&#x53D1;&#x5149;&#x533A;&#x57DF;&#x7684;&#x8FC7;&#x6E21;&#x66F2;&#x7EBF;&#x3002;</small>
-          </label>
-
-          <label class="field luma-matte-only">
-            <span>Luma &#x5F3A;&#x5EA6;</span>
-            <input id="lumaStrengthInput" type="number" min="0" max="2" step="0.05" value="1">
-            <small>&#x63D0;&#x9AD8;&#x53EF;&#x4EE5;&#x4FDD;&#x7559;&#x66F4;&#x591A;&#x706B;&#x7130;&#x3001;&#x95EA;&#x7535;&#x548C;&#x5149;&#x6548;&#x3002;</small>
-          </label>
-
-        </div>
-
-        <div class="process-preview-grid">
-          <div class="process-preview-panel">
-            <div class="process-preview-head">
-              <div>
-                <h3>&#x5355;&#x5E27;&#x53C2;&#x6570;&#x9884;&#x89C8;</h3>
-                <p>&#x4E0D;&#x7528;&#x6574;&#x6BB5;&#x5904;&#x7406;&#xFF0C;&#x5148;&#x7528;&#x5F53;&#x524D;&#x64AD;&#x653E;&#x4F4D;&#x7F6E;&#x62BD;&#x4E00;&#x5E27;&#x770B;&#x6548;&#x679C;&#x3002;</p>
-              </div>
-              <div class="preview-meta">
-                <span id="processPreviewTimeLabel">&#x53D6;&#x6837;&#x65F6;&#x95F4; -</span>
-                <span id="processPreviewKeyLabel">&#x80CC;&#x666F;&#x8272; -</span>
+              <div id="videoToolbar" class="video-toolbar">
+                <span>选区循环 / 自动静音</span>
               </div>
             </div>
 
-            <div class="process-preview-actions">
-              <button id="previewFrameButton" class="ghost-button" type="button">&#x9884;&#x89C8;&#x5F53;&#x524D;&#x5E27;&#x6548;&#x679C;</button>
-              <button id="greenToBlackButton" class="ghost-button" type="button" hidden disabled>&#x6B8B;&#x7EFF;&#x6D82;&#x9ED1;</button>
-              <button id="semiTransparentToBlackButton" class="ghost-button" type="button" hidden disabled>&#x534A;&#x900F;&#x6D82;&#x9ED1;</button>
-              <button id="semiTransparentToOpaqueButton" class="ghost-button" type="button" hidden disabled>&#x534A;&#x900F;&#x53D8;&#x4E0D;&#x900F;&#x660E;</button>
-              <button id="savePreviewButton" class="primary-button" type="button" hidden disabled>&#x4E0B;&#x8F7D;&#x9884;&#x89C8;&#x56FE;</button>
-            </div>
-
-            <div class="process-preview-canvases">
-              <div class="image-preview-box">
-                <div class="image-preview-header">
-                  <span class="image-preview-title">&#x539F;&#x59CB;&#x62BD;&#x5E27;</span>
-                  <div class="image-zoom-controls">
-                    <button id="previewSourceZoomOutButton" class="ghost-button compact-button" type="button">-</button>
-                    <input id="previewSourceZoomInput" type="range" min="50" max="800" step="10" value="100">
-                    <span id="previewSourceZoomLabel" class="zoom-label">100%</span>
-                    <button id="previewSourceZoomResetButton" class="ghost-button compact-button" type="button" title="&#x7F29;&#x653E;&#x91CD;&#x7F6E;&#x4E3A; 100%">100%</button>
-                    <button id="previewSourcePanResetButton" class="ghost-button compact-button" type="button" title="&#x4F4D;&#x7F6E;&#x56DE;&#x4E2D;">&#x56DE;&#x4E2D;</button>
-                    <button id="previewSourceZoomInButton" class="ghost-button compact-button" type="button">+</button>
-                  </div>
-                </div>
-                <div class="image-preview-stage">
-                  <img id="previewSourceImage" alt="source preview" hidden>
-                  <div id="previewSourceEmpty" class="preview-empty">&#x8FD8;&#x6CA1;&#x6709;&#x62BD;&#x53D6;&#x9884;&#x89C8;&#x5E27;&#x3002;</div>
-                </div>
-              </div>
-
-              <div class="image-preview-box">
-                <div class="image-preview-header">
-                  <span class="image-preview-title">&#x5957;&#x7528;&#x53C2;&#x6570;&#x540E;</span>
-                  <div class="process-preview-background-controls">
-                    <select id="processPreviewBackgroundModeInput" aria-label="&#x9884;&#x89C8;&#x80CC;&#x666F;">
-                      <option value="checkerboard">&#x68CB;&#x76D8;&#x683C;</option>
-                      <option value="color">&#x7EAF;&#x8272;&#x80CC;&#x666F;</option>
-                    </select>
-                    <div class="color-row compact-color-row" id="processPreviewBackgroundColorRow">
-                      <input id="processPreviewBackgroundInput" type="color" value="#F6FBF6">
-                      <code id="processPreviewBackgroundLabel">#F6FBF6</code>
+            <div class="segment-panel">
+              <label class="field">
+                <span>起始帧</span>
+                <div class="time-control">
+                  <input id="startRange" type="range" min="0" max="1" step="0.01" value="0">
+                  <div class="stepper-input">
+                    <input id="startInput" type="text" inputmode="numeric" value="1">
+                    <div class="stepper-buttons">
+                      <button id="startStepUpButton" type="button" aria-label="起始帧加一">+</button>
+                      <button id="startStepDownButton" type="button" aria-label="起始帧减一">-</button>
                     </div>
                   </div>
-                  <div class="image-zoom-controls">
-                    <button id="previewProcessedZoomOutButton" class="ghost-button compact-button" type="button">-</button>
-                    <input id="previewProcessedZoomInput" type="range" min="50" max="800" step="10" value="100">
-                    <span id="previewProcessedZoomLabel" class="zoom-label">100%</span>
-                    <button id="previewProcessedZoomResetButton" class="ghost-button compact-button" type="button" title="&#x7F29;&#x653E;&#x91CD;&#x7F6E;&#x4E3A; 100%">100%</button>
-                    <button id="previewProcessedPanResetButton" class="ghost-button compact-button" type="button" title="&#x4F4D;&#x7F6E;&#x56DE;&#x4E2D;">&#x56DE;&#x4E2D;</button>
-                    <button id="previewProcessedZoomInButton" class="ghost-button compact-button" type="button">+</button>
+                </div>
+              </label>
+
+              <label class="field">
+                <span>结束帧</span>
+                <div class="time-control">
+                  <input id="endRange" type="range" min="0" max="1" step="0.01" value="1">
+                  <div class="stepper-input">
+                    <input id="endInput" type="text" inputmode="numeric" value="1">
+                    <div class="stepper-buttons">
+                      <button id="endStepUpButton" type="button" aria-label="结束帧加一">+</button>
+                      <button id="endStepDownButton" type="button" aria-label="结束帧减一">-</button>
+                    </div>
                   </div>
                 </div>
-                <div id="previewProcessedStage" class="image-preview-stage checkerboard-stage">
-                  <img id="previewProcessedImage" alt="processed preview" hidden>
-                  <div id="previewProcessedEmpty" class="preview-empty">&#x8FD9;&#x91CC;&#x4F1A;&#x663E;&#x793A;&#x62A0;&#x80CC;&#x666F;&#x3001;&#x8F6F;&#x8FB9;&#x3001;halo &#x548C;&#x7F29;&#x653E;&#x6548;&#x679C;&#x3002;</div>
+              </label>
+
+              <div class="segment-summary">
+                <span>选中帧数</span>
+                <strong id="segmentLength">0 帧</strong>
+              </div>
+
+              <div class="segment-confirm-bar">
+                <span id="segmentConfirmStatus" class="segment-status confirmed">区间实时生效</span>
+                <small id="segmentConfirmHint">调整起止帧后，预览和处理都会使用当前区间。</small>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel process-panel" id="processPanel" hidden>
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Matte</p>
+              <h2>选择抠图算法与输出设置</h2>
+            </div>
+            <div class="step-lock-note" id="processLockNote">导入素材后即可预览当前帧并开始处理。</div>
+          </div>
+
+          <div class="process-step-shell" id="processStepShell">
+            <div class="parameter-layout">
+              <div class="parameter-column">
+                <div class="control-group">
+                  <div class="group-title">
+                    <span>基础输出</span>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>保留每 N 帧</span>
+                      <input id="keepEveryInput" type="number" min="1" step="1" value="2">
+                      <small>1 为全保留，2 为隔一帧。</small>
+                    </label>
+
+                    <label class="field">
+                      <span>输出尺寸</span>
+                      <input id="outputScaleInput" type="number" min="5" max="200" step="5" value="100" list="outputScalePresets">
+                      <datalist id="outputScalePresets">
+                        <option value="100"></option>
+                        <option value="75"></option>
+                        <option value="50"></option>
+                        <option value="25"></option>
+                      </datalist>
+                      <small>百分比，按源素材高度缩放。</small>
+                    </label>
+
+                    <label class="field">
+                      <span>画布布局</span>
+                      <select id="canvasModeInput">
+                        <option value="auto">自动宽度，居中</option>
+                        <option value="square_bottom">方形画布，底部对齐</option>
+                        <option value="square_center">方形画布，居中</option>
+                      </select>
+                    </label>
+
+                    <label class="field">
+                      <span>画布边距</span>
+                      <input id="reducePxInput" type="number" min="0" step="1" value="0">
+                    </label>
+                  </div>
+                </div>
+
+                <div class="control-group matte-algorithm-group">
+                  <div class="group-title">
+                    <span>选择抠图算法</span>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field checkbox-field">
+                      <span>启用抠背景</span>
+                      <label class="checkbox-row">
+                        <input id="chromaEnabledInput" type="checkbox" checked>
+                        <span>输出透明 PNG</span>
+                      </label>
+                    </label>
+
+                    <label class="field">
+                      <span>抠图算法</span>
+                      <select id="matteModeInput">
+                        <option value="chroma">我的绿幕抠图算法</option>
+                        <option value="birefnet">只用 BiRefNet</option>
+                        <option value="corridorkey">只用 CorridorKey</option>
+                        <option value="luma">只用 Luma</option>
+                        <option value="birefnet_corridorkey">BiRefNet 粗蒙版 / CorridorKey 精修边缘</option>
+                        <option value="birefnet_corridorkey_key">BiRefNet 后再用 CorridorKey 收紧抠图</option>
+                        <option value="birefnet_luma">BiRefNet 保主体 / Luma 补亮部</option>
+                        <option value="birefnet_luma_key">BiRefNet 后再用 Luma 收紧抠图</option>
+                        <option value="birefnet_luma_corridorkey">BiRefNet + Luma 合并后 / CorridorKey 精修</option>
+                        <option value="none">不抠图，只缩放对齐</option>
+                      </select>
+                      <small>“精修”会重建边缘和颜色；“收紧”只会进一步删掉背景。</small>
+                    </label>
+
+                    <details class="algorithm-help" aria-label="抠图算法说明">
+                      <summary class="algorithm-help-head">
+                        <strong>算法速查</strong>
+                        <span>先按素材类型选，再用单帧预览微调。</span>
+                        <span class="algorithm-help-toggle" aria-hidden="true"></span>
+                      </summary>
+                      <dl>
+                        <div>
+                          <dt>我的绿幕抠图算法</dt>
+                          <dd>最快。适合绿幕、蓝幕、白底、灰底等受控纯色背景。</dd>
+                        </div>
+                        <div>
+                          <dt>只用 BiRefNet</dt>
+                          <dd>AI 主体抠图。适合非纯色背景、AI 生成背景、真实环境背景。</dd>
+                        </div>
+                        <div>
+                          <dt>只用 CorridorKey</dt>
+                          <dd>先生成粗 alpha，再重建绿幕/蓝幕边缘和前景颜色。</dd>
+                        </div>
+                        <div>
+                          <dt>只用 Luma</dt>
+                          <dd>按亮度生成 alpha。适合火焰、闪电、发光粒子等亮部特效。</dd>
+                        </div>
+                        <div>
+                          <dt>BiRefNet 粗蒙版 / CorridorKey 精修边缘</dt>
+                          <dd>BiRefNet 先找主体，CorridorKey 再修绿幕/蓝幕边缘。</dd>
+                        </div>
+                        <div>
+                          <dt>BiRefNet 后再用 CorridorKey 收紧抠图</dt>
+                          <dd>先精修边缘，再和 BiRefNet alpha 相交，只继续删除背景。</dd>
+                        </div>
+                        <div>
+                          <dt>BiRefNet 保主体 / Luma 补亮部</dt>
+                          <dd>主体 alpha 加亮度 alpha。适合 VFX 重、需要保留发光尾迹的素材。</dd>
+                        </div>
+                        <div>
+                          <dt>BiRefNet 后再用 Luma 收紧抠图</dt>
+                          <dd>BiRefNet alpha 与亮度 alpha 相交，让 Luma 删除不够亮的背景。</dd>
+                        </div>
+                        <div>
+                          <dt>BiRefNet + Luma 合并后 / CorridorKey 精修</dt>
+                          <dd>先合并主体和亮部，再用 CorridorKey 做边缘/颜色重建。</dd>
+                        </div>
+                        <div>
+                          <dt>不抠图，只缩放对齐</dt>
+                          <dd>素材已经带透明通道时用，避免重新抠图破坏原 alpha。</dd>
+                        </div>
+                      </dl>
+                    </details>
+
+                    <label class="field">
+                      <span>取色方式</span>
+                      <select id="keyModeInput">
+                        <option value="auto">自动取背景色</option>
+                        <option value="manual">手动指定颜色</option>
+                      </select>
+                    </label>
+
+                    <label id="manualColorField" class="field manual-color-field">
+                      <span>背景色</span>
+                      <div class="color-field">
+                        <input id="manualKeyInput" type="color" value="#00ff00">
+                        <strong id="manualKeyLabel">#00FF00</strong>
+                      </div>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="control-group chroma-only">
+                  <div class="group-title">
+                    <span>绿幕参数</span>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>阈值</span>
+                      <input id="thresholdInput" type="number" min="0" max="255" step="1" value="42">
+                    </label>
+                    <label class="field">
+                      <span>边缘柔化</span>
+                      <input id="softnessInput" type="number" min="0" max="255" step="1" value="8">
+                    </label>
+                  </div>
+                </div>
+
+                <div class="control-group spill-matte-only">
+                  <div class="group-title">
+                    <span>边缘修整</span>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>去溢色</span>
+                      <input id="despillInput" type="number" min="0" max="1" step="0.05" value="0.6">
+                    </label>
+                    <label class="field">
+                      <span>Halo 收边</span>
+                      <input id="haloInput" type="number" min="0" max="20" step="1" value="1">
+                    </label>
+                  </div>
+                </div>
+
+                <div class="hidden-runtime-controls" hidden>
+                  <select id="aiModelInput" aria-label="AI 模型">
+                    <option value="birefnet-hr-matting" selected>BiRefNet HR-matting</option>
+                  </select>
+                  <select id="aiDeviceInput" aria-label="AI 设备">
+                    <option value="auto" selected>自动</option>
+                  </select>
+                  <select id="aiResolutionInput" aria-label="AI 推理尺寸">
+                    <option value="auto" selected>自动</option>
+                  </select>
+                </div>
+
+                <div class="control-group corridor-key-only">
+                  <div class="group-title">
+                    <span>CorridorKey</span>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field checkbox-field">
+                      <span>状态</span>
+                      <label class="checkbox-row">
+                        <input id="corridorEnabledInput" type="checkbox">
+                        <span>使用 CorridorKey 细化边缘</span>
+                      </label>
+                    </label>
+                    <label class="field">
+                      <span>幕布颜色</span>
+                      <select id="corridorScreenInput">
+                        <option value="auto">自动</option>
+                        <option value="green">绿色</option>
+                        <option value="blue">蓝色</option>
+                      </select>
+                    </label>
+                  </div>
+                </div>
+
+                <div class="control-group luma-matte-only">
+                  <div class="group-title">
+                    <span>Luma 遮罩</span>
+                    <span class="preset-row">
+                      <button type="button" class="ghost-button tiny" data-luma-preset="soft">温和</button>
+                      <button type="button" class="ghost-button tiny" data-luma-preset="balanced">中等</button>
+                      <button type="button" class="ghost-button tiny" data-luma-preset="strong">强力</button>
+                    </span>
+                  </div>
+                  <div class="form-grid">
+                    <label class="field">
+                      <span>黑场</span>
+                      <input id="lumaBlackInput" type="number" min="0" max="255" step="1" value="0">
+                    </label>
+                    <label class="field">
+                      <span>白场</span>
+                      <input id="lumaWhiteInput" type="number" min="0" max="255" step="1" value="85">
+                    </label>
+                    <label class="field">
+                      <span>Gamma</span>
+                      <input id="lumaGammaInput" type="number" min="0.1" max="5" step="0.05" value="0.55">
+                    </label>
+                    <label class="field">
+                      <span>强度</span>
+                      <input id="lumaStrengthInput" type="number" min="0.1" max="5" step="0.05" value="1.7">
+                    </label>
+                  </div>
+                </div>
+
+                <div class="control-group">
+                  <div class="group-title">
+                    <span>批处理后处理</span>
+                  </div>
+                  <div class="check-stack">
+                    <label class="checkbox-row">
+                      <input id="batchGreenToBlackInput" type="checkbox">
+                      <span>绿色残边转黑</span>
+                    </label>
+                    <label class="checkbox-row">
+                      <input id="batchGreenDesaturateInput" type="checkbox">
+                      <span>绿色残边饱和度归零</span>
+                    </label>
+                    <label class="checkbox-row">
+                      <input id="batchSemiTransparentToBlackInput" type="checkbox">
+                      <span>半透明像素转黑</span>
+                    </label>
+                    <label class="checkbox-row">
+                      <input id="batchSemiTransparentToOpaqueInput" type="checkbox">
+                      <span>半透明像素转不透明</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="preview-column">
+                <div class="preview-toolbar">
+                  <div>
+                    <strong id="processPreviewTimeLabel">取样时间 -</strong>
+                    <span id="processPreviewKeyLabel">取样方式 - / 抠图 -</span>
+                  </div>
+                  <button id="previewFrameButton" class="primary-button" type="button">预览当前帧</button>
+                </div>
+
+                <div class="compare-grid">
+                  <article class="compare-panel">
+                    <div class="compare-head">
+                      <span>原始抽帧</span>
+                      <div class="zoom-controls">
+                        <button id="previewSourceZoomOutButton" class="icon-button" type="button" aria-label="缩小原图">-</button>
+                        <input id="previewSourceZoomInput" type="range" min="50" max="800" step="10" value="100">
+                        <button id="previewSourceZoomInButton" class="icon-button" type="button" aria-label="放大原图">+</button>
+                        <button id="previewSourceZoomResetButton" class="ghost-button tiny" type="button">100%</button>
+                        <button id="previewSourcePanResetButton" class="ghost-button tiny" type="button">归位</button>
+                        <span id="previewSourceZoomLabel">100%</span>
+                      </div>
+                    </div>
+                    <div class="image-preview-stage checkerboard-stage">
+                      <img id="previewSourceImage" alt="原始抽帧预览" hidden>
+                      <div id="previewSourceEmpty" class="empty-state">等待生成预览</div>
+                    </div>
+                  </article>
+
+                  <article class="compare-panel">
+                    <div class="compare-head">
+                      <span>套用参数后</span>
+                      <div class="zoom-controls">
+                        <button id="previewProcessedZoomOutButton" class="icon-button" type="button" aria-label="缩小结果">-</button>
+                        <input id="previewProcessedZoomInput" type="range" min="50" max="800" step="10" value="100">
+                        <button id="previewProcessedZoomInButton" class="icon-button" type="button" aria-label="放大结果">+</button>
+                        <button id="previewProcessedZoomResetButton" class="ghost-button tiny" type="button">100%</button>
+                        <button id="previewProcessedPanResetButton" class="ghost-button tiny" type="button">归位</button>
+                        <span id="previewProcessedZoomLabel">100%</span>
+                      </div>
+                    </div>
+                    <div id="previewProcessedStage" class="image-preview-stage checkerboard-stage">
+                      <img id="previewProcessedImage" alt="处理后预览" hidden>
+                      <div id="previewProcessedEmpty" class="empty-state">等待生成预览</div>
+                    </div>
+                  </article>
+                </div>
+
+                <div class="preview-options">
+                  <label class="field">
+                    <span>结果背景</span>
+                    <select id="processPreviewBackgroundModeInput">
+                      <option value="checkerboard">棋盘格</option>
+                      <option value="color">纯色</option>
+                    </select>
+                  </label>
+                  <label id="processPreviewBackgroundColorRow" class="field color-row" hidden>
+                    <span>背景色 <strong id="processPreviewBackgroundLabel">#F6FBF6</strong></span>
+                    <input id="processPreviewBackgroundInput" type="color" value="#f6fbf6">
+                  </label>
+                </div>
+
+                <div class="postprocess-actions">
+                  <button id="greenToBlackButton" class="ghost-button" type="button" hidden>绿边转黑</button>
+                  <button id="greenDesaturateButton" class="ghost-button" type="button" hidden>绿边去饱和</button>
+                  <button id="semiTransparentToBlackButton" class="ghost-button" type="button" hidden>半透明转黑</button>
+                  <button id="semiTransparentToOpaqueButton" class="ghost-button" type="button" hidden>半透明转不透明</button>
+                  <button id="savePreviewButton" class="ghost-button" type="button" hidden>下载预览帧</button>
+                </div>
+
+                <div class="action-bar">
+                  <button id="processButton" class="primary-button large" type="button">开始处理区间</button>
                 </div>
               </div>
             </div>
           </div>
-        </div>
+        </section>
 
-        <div class="action-row">
-          <button id="processButton" class="primary-button" type="button">&#x5F00;&#x59CB;&#x5904;&#x7406;</button>
-        </div>
-        </div>
-      </section>
-
-      <section class="panel panel-wide" id="resultPanel" hidden>
-        <div class="panel-head">
-          <div>
-            <h2>4. &#x68C0;&#x67E5;&#x5E27;&#x5E76;&#x5BFC;&#x51FA;</h2>
-            <p>&#x4F60;&#x53EF;&#x4EE5;&#x5904;&#x7406;&#x89C6;&#x9891;&#x540E;&#x68C0;&#x67E5;&#x5E27;&#xFF0C;&#x4E5F;&#x53EF;&#x4EE5;&#x76F4;&#x63A5;&#x5BFC;&#x5165;&#x81EA;&#x5DF1;&#x7684;&#x52A8;&#x753B;&#x5E27;&#x5E8F;&#x5217;&#xFF0C;&#x6309;&#x6587;&#x4EF6;&#x540D;&#x987A;&#x5E8F;&#x64AD;&#x653E;&#x3002;</p>
-          </div>
-        </div>
-
-        <div id="jobSummary" class="result-summary"></div>
-
-        <div class="selection-toolbar">
-          <div class="selection-actions">
-            <button id="selectAllButton" class="secondary-button" type="button">&#x5168;&#x9009;</button>
-            <button id="selectNoneButton" class="secondary-button" type="button">&#x5168;&#x4E0D;&#x9009;</button>
-            <button id="selectOddButton" class="secondary-button" type="button">&#x5947;&#x6570;&#x5E27;</button>
-            <button id="selectEvenButton" class="secondary-button" type="button">&#x5076;&#x6570;&#x5E27;</button>
-            <button id="invertSelectionButton" class="secondary-button" type="button">&#x53CD;&#x9009;</button>
-          </div>
-          <div class="custom-animation-actions">
-            <input id="customAnimationInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp" multiple hidden>
-            <input id="customAnimationFolderInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/png,image/jpeg,image/webp,image/bmp" webkitdirectory directory multiple hidden>
-            <button id="clearPreviewFramesButton" class="ghost-button" type="button">&#x6E05;&#x7A7A;&#x9884;&#x89C8;&#x5E27;</button>
-            <button id="importAnimationButton" class="ghost-button" type="button">&#x5BFC;&#x5165;&#x52A8;&#x753B;&#x5E27;</button>
-            <button id="importAnimationFolderButton" class="ghost-button" type="button">&#x5BFC;&#x5165;&#x6587;&#x4EF6;&#x5939;</button>
-          </div>
-          <div class="selection-meta">
-            <span id="selectionCount">&#x5DF2;&#x9009; 0 &#x5E27;</span>
-            <button id="openProcessedButton" class="ghost-button" type="button">&#x6253;&#x5F00;&#x5904;&#x7406;&#x76EE;&#x5F55;</button>
-          </div>
-        </div>
-
-        <div class="result-workbench">
-          <div class="preview-card">
-            <div class="preview-head">
-              <div>
-                <h3>&#x52A8;&#x753B;&#x9884;&#x89C8;</h3>
-                <p>&#x53EA;&#x4F1A;&#x64AD;&#x653E;&#x5F53;&#x524D;&#x52FE;&#x9009;&#x7684;&#x5E27;&#x3002;</p>
-              </div>
-              <div class="preview-meta">
-                <span id="previewFrameLabel">&#x5F53;&#x524D; -</span>
-                <span id="previewSelectedCount">&#x5DF2;&#x52A0;&#x8F7D; 0 &#x5E27;</span>
-              </div>
+        <section class="panel result-panel" id="resultPanel" hidden>
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">Review</p>
+              <h2>帧检查与导出</h2>
             </div>
-
-            <div class="animation-stage">
-              <canvas id="animationPreviewCanvas" width="320" height="320"></canvas>
-              <div id="previewEmptyState" class="preview-empty">&#x52FE;&#x9009;&#x81F3;&#x5C11;&#x4E00;&#x5E27;&#x540E;&#xFF0C;&#x8FD9;&#x91CC;&#x4F1A;&#x5FAA;&#x73AF;&#x64AD;&#x653E;&#x52A8;&#x753B;&#x3002;</div>
+            <div class="result-actions">
+              <input id="customAnimationInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/*" multiple hidden>
+              <input id="customAnimationFolderInput" type="file" accept=".png,.jpg,.jpeg,.webp,.bmp,image/*" multiple webkitdirectory hidden>
+              <button id="importAnimationButton" class="ghost-button" type="button">导入帧序列</button>
+              <button id="importAnimationFolderButton" class="ghost-button" type="button">导入文件夹</button>
+              <button id="openProcessedButton" class="ghost-button" type="button">打开处理目录</button>
             </div>
+          </div>
 
-            <div class="preview-progress">
-              <div id="previewProgressBar" class="preview-progress-bar" aria-hidden="true">
-                <div id="previewProgressFill" class="preview-progress-fill"></div>
-              </div>
-              <div class="preview-progress-meta">
-                <span>&#x64AD;&#x653E;&#x8FDB;&#x5EA6;</span>
-                <span id="previewProgressLabel">0 / 0</span>
-              </div>
-            </div>
+          <div class="job-summary" id="jobSummary"></div>
 
-            <div class="preview-controls">
-              <button id="previewPlayPauseButton" class="secondary-button" type="button">&#x6682;&#x505C;&#x9884;&#x89C8;</button>
-              <button id="previewRestartButton" class="ghost-button" type="button">&#x4ECE;&#x5934;&#x64AD;&#x653E;</button>
-              <div class="field compact-field preview-direction-field">
-                <span>&#x64AD;&#x653E;&#x65B9;&#x5411;</span>
-                <label class="checkbox-row">
+          <div class="review-layout">
+            <aside class="animation-panel">
+              <div class="animation-stage">
+                <canvas id="animationPreviewCanvas" width="512" height="512"></canvas>
+                <div id="previewEmptyState" class="empty-state">还没有帧</div>
+              </div>
+              <div class="preview-status">
+                <strong id="previewFrameLabel">预览帧</strong>
+                <span id="previewSelectedCount">已加载 0 帧</span>
+              </div>
+              <div id="previewProgressBar" class="preview-progress">
+                <div id="previewProgressFill"></div>
+              </div>
+              <span id="previewProgressLabel" class="progress-label">0 / 0</span>
+              <div class="playback-controls">
+                <button id="previewPlayPauseButton" class="ghost-button" type="button">播放预览</button>
+                <button id="previewRestartButton" class="ghost-button" type="button">重播</button>
+                <label class="checkbox-row compact">
                   <input id="previewReverseInput" type="checkbox">
-                  <span>&#x5012;&#x5E8F;&#x64AD;&#x653E; / &#x5BFC;&#x51FA;</span>
+                  <span>反向</span>
                 </label>
               </div>
-              <label class="field compact-field">
-                <span>&#x9884;&#x89C8;&#x80CC;&#x666F;&#x8272;</span>
-                <div class="color-row compact-color-row">
-                  <input id="previewBackgroundInput" type="color" value="#F6FBF6">
-                  <code id="previewBackgroundLabel">#F6FBF6</code>
+              <div class="form-grid compact-form">
+                <label class="field">
+                  <span>背景 <strong id="previewBackgroundLabel">#F6FBF6</strong></span>
+                  <input id="previewBackgroundInput" type="color" value="#f6fbf6">
+                </label>
+                <label class="field">
+                  <span>间隔 ms</span>
+                  <input id="previewIntervalInput" type="number" min="20" max="5000" step="10" value="100">
+                </label>
+              </div>
+            </aside>
+
+            <div class="frames-panel">
+              <div class="frames-toolbar">
+                <strong id="selectionCount">已选 0 / 0 帧</strong>
+                <div class="button-row">
+                  <button id="selectAllButton" class="ghost-button tiny" type="button">全选</button>
+                  <button id="selectNoneButton" class="ghost-button tiny" type="button">全不选</button>
+                  <button id="selectOddButton" class="ghost-button tiny" type="button">奇数帧</button>
+                  <button id="selectEvenButton" class="ghost-button tiny" type="button">偶数帧</button>
+                  <button id="invertSelectionButton" class="ghost-button tiny" type="button">反选</button>
+                  <button id="clearPreviewFramesButton" class="ghost-button tiny" type="button">清空</button>
                 </div>
-              </label>
-              <label class="field compact-field">
-                <span>&#x5E27;&#x95F4;&#x9694;&#xFF08;&#x6BEB;&#x79D2;&#xFF09;</span>
-                <input id="previewIntervalInput" type="number" min="20" step="10" value="100">
-              </label>
+              </div>
+              <div id="frameGrid" class="frame-grid"></div>
             </div>
           </div>
 
-          <div class="frames-panel">
-            <div class="frames-panel-head">
-              <h3>&#x5E27;&#x5217;&#x8868;</h3>
-              <p>&#x53F3;&#x8FB9;&#x7EE7;&#x7EED;&#x9009;&#x5E27;&#xFF0C;&#x5DE6;&#x8FB9;&#x4F1A;&#x7ACB;&#x5373;&#x66F4;&#x65B0;&#x64AD;&#x653E;&#x5E8F;&#x5217;&#x3002;</p>
-            </div>
-            <div id="frameGrid" class="frame-grid"></div>
+          <div class="export-bar">
+            <button id="exportButton" class="primary-button large" type="button">导出选中帧</button>
           </div>
-        </div>
+          <div id="exportResult" class="export-result" hidden></div>
+        </section>
+      </main>
+    </div>
 
-        <div class="export-bar">
-          <label class="field compact-field">
-            <span>Sprite Sheet &#x5217;&#x6570;</span>
-            <input id="sheetColumnsInput" type="number" min="1" step="1" value="4">
-          </label>
-          <button id="exportButton" class="primary-button" type="button">&#x5BFC;&#x51FA;&#x9009;&#x4E2D;&#x5E27;</button>
-        </div>
-
-        <div id="exportResult" class="export-result" hidden></div>
-      </section>
-    </main>
-
-    <footer class="footer">
-      <div id="appStatus" class="status-message">&#x7B49;&#x5F85;&#x5BFC;&#x5165;&#x7D20;&#x6750;&#x3002;</div>
+    <footer class="statusbar" role="status" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span id="appStatus">等待导入素材。</span>
     </footer>
   </div>
 

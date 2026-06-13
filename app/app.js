@@ -40,6 +40,12 @@ const AI_RESOLUTION_MIN = 256;
 const AI_RESOLUTION_MAX = 2560;
 const AI_RESOLUTION_STEP = 32;
 const AI_RESOLUTION_DEFAULT = 1024;
+const AI_RESOLUTION_AUTO = "auto";
+const AI_MODEL_AUTO = "birefnet-hr-matting";
+const AI_DEVICE_AUTO = "auto";
+const OUTPUT_SCALE_MIN_PERCENT = 5;
+const OUTPUT_SCALE_MAX_PERCENT = 200;
+const OUTPUT_SCALE_DEFAULT_PERCENT = 100;
 let hotReloadVersion = null;
 let hotReloadTimerId = null;
 let uploadDragDepth = 0;
@@ -59,7 +65,7 @@ document.addEventListener("DOMContentLoaded", () => {
   showAnimationWorkbench();
   setStatus("\u7B49\u5F85\u5BFC\u5165\u7D20\u6750\u3002");
   restoreSessionFromStorage();
-  normalizeAiResolutionInput(false);
+  enforceAutomaticAiSettings(false);
   startHotReloadPolling();
   window.addEventListener("beforeunload", persistSession);
 });
@@ -95,7 +101,7 @@ function bindElements() {
     "segmentConfirmStatus",
     "segmentConfirmHint",
     "keepEveryInput",
-    "targetSizeInput",
+    "outputScaleInput",
     "canvasModeInput",
     "reducePxInput",
     "chromaEnabledInput",
@@ -118,10 +124,12 @@ function bindElements() {
     "lumaGammaInput",
     "lumaStrengthInput",
     "batchGreenToBlackInput",
+    "batchGreenDesaturateInput",
     "batchSemiTransparentToBlackInput",
     "batchSemiTransparentToOpaqueInput",
     "previewFrameButton",
     "greenToBlackButton",
+    "greenDesaturateButton",
     "semiTransparentToBlackButton",
     "semiTransparentToOpaqueButton",
     "savePreviewButton",
@@ -178,7 +186,6 @@ function bindElements() {
     "selectOddButton",
     "selectEvenButton",
     "invertSelectionButton",
-    "sheetColumnsInput",
     "exportButton",
     "exportResult",
     "appStatus",
@@ -192,6 +199,7 @@ function bindEvents() {
   els.uploadInput.addEventListener("change", handleUploadInputChange);
   els.previewFrameButton.addEventListener("click", previewCurrentFrame);
   els.greenToBlackButton.addEventListener("click", applyGreenToBlackPreview);
+  els.greenDesaturateButton.addEventListener("click", applyGreenDesaturatePreview);
   els.semiTransparentToBlackButton.addEventListener("click", applySemiTransparentToBlackPreview);
   els.semiTransparentToOpaqueButton.addEventListener("click", applySemiTransparentToOpaquePreview);
   els.savePreviewButton.addEventListener("click", downloadProcessPreviewResult);
@@ -330,7 +338,7 @@ function bindEvents() {
 
   [
     els.keepEveryInput,
-    els.targetSizeInput,
+    els.outputScaleInput,
     els.canvasModeInput,
     els.reducePxInput,
     els.chromaEnabledInput,
@@ -351,6 +359,7 @@ function bindEvents() {
     els.lumaGammaInput,
     els.lumaStrengthInput,
     els.batchGreenToBlackInput,
+    els.batchGreenDesaturateInput,
     els.batchSemiTransparentToBlackInput,
     els.batchSemiTransparentToOpaqueInput,
     els.startInput,
@@ -613,6 +622,10 @@ function currentUsesCorridorKey() {
 }
 
 function normalizeAiResolution(value) {
+  const rawText = String(value ?? "").trim().toLowerCase();
+  if (!rawText || rawText === AI_RESOLUTION_AUTO) {
+    return AI_RESOLUTION_AUTO;
+  }
   const numeric = Number(value);
   const raw = Number.isFinite(numeric) ? numeric : AI_RESOLUTION_DEFAULT;
   const clamped = clamp(Math.round(raw), AI_RESOLUTION_MIN, AI_RESOLUTION_MAX);
@@ -620,14 +633,57 @@ function normalizeAiResolution(value) {
   return clamp(aligned, AI_RESOLUTION_MIN, AI_RESOLUTION_MAX);
 }
 
+function ensureAiResolutionOption(value) {
+  const normalizedValue = String(value);
+  if ([...els.aiResolutionInput.options].some((option) => option.value === normalizedValue)) {
+    return;
+  }
+  const option = document.createElement("option");
+  option.value = normalizedValue;
+  option.textContent = `${normalizedValue} px`;
+  els.aiResolutionInput.appendChild(option);
+}
+
+function setAiResolutionValue(value) {
+  const normalized = normalizeAiResolution(value);
+  ensureAiResolutionOption(normalized);
+  els.aiResolutionInput.value = String(normalized);
+}
+
 function normalizeAiResolutionInput(shouldPersist = true) {
   const normalized = normalizeAiResolution(els.aiResolutionInput.value);
-  if (els.aiResolutionInput.value !== String(normalized)) {
-    els.aiResolutionInput.value = String(normalized);
-  }
+  setAiResolutionValue(normalized);
   if (shouldPersist) {
     persistSession();
   }
+}
+
+function enforceAutomaticAiSettings(shouldPersist = false) {
+  els.aiModelInput.value = AI_MODEL_AUTO;
+  els.aiDeviceInput.value = AI_DEVICE_AUTO;
+  setAiResolutionValue(AI_RESOLUTION_AUTO);
+  if (shouldPersist) {
+    persistSession();
+  }
+}
+
+function normalizeOutputScalePercent(value) {
+  const numeric = Number(value);
+  const raw = Number.isFinite(numeric) ? numeric : OUTPUT_SCALE_DEFAULT_PERCENT;
+  return clamp(Math.round(raw), OUTPUT_SCALE_MIN_PERCENT, OUTPUT_SCALE_MAX_PERCENT);
+}
+
+function currentOutputScale() {
+  return normalizeOutputScalePercent(els.outputScaleInput.value) / 100;
+}
+
+function outputScalePercentFromLegacyTarget(targetSize) {
+  const height = Number(currentUploadInfo().height || 0);
+  const target = Number(targetSize || 0);
+  if (!height || !target) {
+    return null;
+  }
+  return normalizeOutputScalePercent((target / height) * 100);
 }
 
 const LUMA_PRESETS = {
@@ -663,7 +719,7 @@ function applyLumaPreset(key) {
   els.matteModeInput.value = "birefnet_luma";
   els.haloInput.value = "0";
   els.corridorEnabledInput.checked = false;
-  els.aiResolutionInput.value = "2560";
+  els.aiResolutionInput.value = AI_RESOLUTION_AUTO;
   els.lumaBlackInput.value = String(preset.black);
   els.lumaWhiteInput.value = String(preset.white);
   els.lumaGammaInput.value = String(preset.gamma);
@@ -676,7 +732,7 @@ function applyLumaPreset(key) {
 function collectFormState() {
   return {
     keep_every: Number(els.keepEveryInput.value || 1),
-    target_size: Number(els.targetSizeInput.value || 128),
+    output_scale: currentOutputScale(),
     canvas_mode: els.canvasModeInput.value,
     reduce_px: Number(els.reducePxInput.value || 0),
     chroma_enabled: els.chromaEnabledInput.checked,
@@ -692,11 +748,13 @@ function collectFormState() {
     ai_model: els.aiModelInput.value,
     ai_device: els.aiDeviceInput.value,
     ai_resolution: normalizeAiResolution(els.aiResolutionInput.value),
+    ai_resolution_mode: normalizeAiResolution(els.aiResolutionInput.value) === AI_RESOLUTION_AUTO ? "auto" : "manual",
     luma_black: Number(els.lumaBlackInput.value || 24),
     luma_white: Number(els.lumaWhiteInput.value || 230),
     luma_gamma: Number(els.lumaGammaInput.value || 1),
     luma_strength: Number(els.lumaStrengthInput.value || 1),
     batch_green_to_black: els.batchGreenToBlackInput.checked,
+    batch_green_desaturate: els.batchGreenDesaturateInput.checked,
     batch_semitransparent_to_black: els.batchSemiTransparentToBlackInput.checked,
     batch_semitransparent_to_opaque: els.batchSemiTransparentToOpaqueInput.checked,
     preview_background: state.preview.background,
@@ -728,7 +786,7 @@ function collectProcessingPayload() {
     start_frame: state.segment.startFrame,
     end_frame: state.segment.endFrame,
     keep_every: Number(els.keepEveryInput.value || 1),
-    target_size: Number(els.targetSizeInput.value || 128),
+    output_scale: currentOutputScale(),
     canvas_mode: els.canvasModeInput.value,
     reduce_px: Number(els.reducePxInput.value || 0),
     chroma_enabled: els.chromaEnabledInput.checked,
@@ -749,6 +807,7 @@ function collectProcessingPayload() {
     luma_gamma: Number(els.lumaGammaInput.value || 1),
     luma_strength: Number(els.lumaStrengthInput.value || 1),
     batch_green_to_black: els.batchGreenToBlackInput.checked,
+    batch_green_desaturate: els.batchGreenDesaturateInput.checked,
     batch_semitransparent_to_black: els.batchSemiTransparentToBlackInput.checked,
     batch_semitransparent_to_opaque: els.batchSemiTransparentToOpaqueInput.checked,
   };
@@ -760,7 +819,14 @@ function applyFormState(snapshot) {
   }
 
   if (snapshot.keep_every != null) els.keepEveryInput.value = String(snapshot.keep_every);
-  if (snapshot.target_size != null) els.targetSizeInput.value = String(snapshot.target_size);
+  if (snapshot.output_scale != null) {
+    els.outputScaleInput.value = String(normalizeOutputScalePercent(Number(snapshot.output_scale) * 100));
+  } else if (snapshot.target_size != null) {
+    const legacyPercent = outputScalePercentFromLegacyTarget(snapshot.target_size);
+    if (legacyPercent != null) {
+      els.outputScaleInput.value = String(legacyPercent);
+    }
+  }
   if (snapshot.canvas_mode && [...els.canvasModeInput.options].some((option) => option.value === snapshot.canvas_mode)) {
     els.canvasModeInput.value = snapshot.canvas_mode;
   }
@@ -791,18 +857,15 @@ function applyFormState(snapshot) {
   ) {
     els.corridorScreenInput.value = snapshot.corridorkey_screen;
   }
-  if (snapshot.ai_model && [...els.aiModelInput.options].some((option) => option.value === snapshot.ai_model)) {
-    els.aiModelInput.value = snapshot.ai_model;
-  }
-  if (snapshot.ai_device && [...els.aiDeviceInput.options].some((option) => option.value === snapshot.ai_device)) {
-    els.aiDeviceInput.value = snapshot.ai_device;
-  }
-  if (snapshot.ai_resolution != null) els.aiResolutionInput.value = String(normalizeAiResolution(snapshot.ai_resolution));
+  enforceAutomaticAiSettings(false);
   if (snapshot.luma_black != null) els.lumaBlackInput.value = String(snapshot.luma_black);
   if (snapshot.luma_white != null) els.lumaWhiteInput.value = String(snapshot.luma_white);
   if (snapshot.luma_gamma != null) els.lumaGammaInput.value = String(snapshot.luma_gamma);
   if (snapshot.luma_strength != null) els.lumaStrengthInput.value = String(snapshot.luma_strength);
   if (snapshot.batch_green_to_black != null) els.batchGreenToBlackInput.checked = Boolean(snapshot.batch_green_to_black);
+  if (snapshot.batch_green_desaturate != null) {
+    els.batchGreenDesaturateInput.checked = Boolean(snapshot.batch_green_desaturate);
+  }
   if (snapshot.batch_semitransparent_to_black != null) {
     els.batchSemiTransparentToBlackInput.checked = Boolean(snapshot.batch_semitransparent_to_black);
   }
@@ -898,7 +961,7 @@ function restoreSessionFromStorage() {
   }
 
   if (snapshot.upload) {
-    applyUpload(snapshot.upload);
+    applyUpload(snapshot.upload, { resetSizing: false });
   } else {
     resetPreviewState();
     state.upload = null;
@@ -1032,8 +1095,7 @@ function bindUploadDropzone() {
     event.preventDefault();
     uploadDragDepth = 0;
     els.uploadDropzone.classList.remove("dragging");
-    const [file] = event.dataTransfer?.files || [];
-    await uploadSelectedFile(file);
+    await uploadSelectedFiles(Array.from(event.dataTransfer?.files || []));
   });
 }
 
@@ -1062,6 +1124,10 @@ function isImageUpload(upload = state.upload) {
   return uploadMediaType(upload) === "image";
 }
 
+function isImageSequenceUpload(upload = state.upload) {
+  return uploadMediaType(upload) === "image_sequence";
+}
+
 function isVideoUpload(upload = state.upload) {
   return uploadMediaType(upload) === "video";
 }
@@ -1086,6 +1152,9 @@ function formatSourceModeLabel(ffmpegAccel, sourceMediaType = uploadMediaType())
   const type = String(sourceMediaType || "video").toLowerCase();
   if (type === "animation") {
     return "\u81EA\u5B9A\u4E49\u52A8\u753B";
+  }
+  if (type === "image_sequence") {
+    return "\u56FE\u7247\u5E8F\u5217";
   }
   if (type === "image") {
     return "\u9759\u6001\u56FE\u7247";
@@ -1137,7 +1206,7 @@ function formatMatteDetail(matte) {
     parts.push(`Luma ${matte.luma_black}-${matte.luma_white}`);
   }
   if (matte.resolution) {
-    parts.push(`${matte.resolution}px`);
+    parts.push(matteModeUsesBiRefNet(matte.mode) ? `AI ${matte.resolution}px` : `${matte.resolution}px`);
   }
   if (matte.corridorkey_enabled) {
     const screen = formatCorridorScreenLabel(matte.corridorkey_screen_color);
@@ -1152,6 +1221,23 @@ function formatCanvasModeLabel(value) {
   if (value === "square_bottom") return "\u65B9\u5F62 / \u5E95\u90E8";
   if (value === "square_center") return "\u65B9\u5F62 / \u5C45\u4E2D";
   return "\u81EA\u52A8\u5BBD\u5EA6 / \u5C45\u4E2D";
+}
+
+function formatOutputScaleLabel(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) {
+    return "-";
+  }
+  return `${Math.round(numeric * 100)}%`;
+}
+
+function formatSizeLabel(width, height) {
+  const safeWidth = Number(width);
+  const safeHeight = Number(height);
+  if (!Number.isFinite(safeWidth) || !Number.isFinite(safeHeight) || safeWidth <= 0 || safeHeight <= 0) {
+    return "";
+  }
+  return `${Math.round(safeWidth)} \u00d7 ${Math.round(safeHeight)}`;
 }
 
 async function importFromPath() {
@@ -1173,27 +1259,33 @@ async function importFromPath() {
 }
 
 async function handleUploadInputChange() {
-  const [file] = els.uploadInput.files || [];
-  await uploadSelectedFile(file);
+  await uploadSelectedFiles(Array.from(els.uploadInput.files || []));
   els.uploadInput.value = "";
 }
 
-async function uploadSelectedFile(file) {
-  if (!file) {
+async function uploadSelectedFiles(files) {
+  if (!files.length) {
     return;
   }
-  if (!isSupportedUploadFile(file)) {
-    setStatus("\u53EA\u652F\u6301\u89C6\u9891\u3001GIF \u52A8\u56FE\u6216\u5355\u5F20\u56FE\u7247\uFF1A.mp4 / .mov / .mkv / .webm / .gif / .png / .jpg / .jpeg / .webp / .bmp\u3002", "error");
+  if (files.length > 1 && !files.every(isSupportedImageFile)) {
+    setStatus("\u591A\u6587\u4EF6\u5BFC\u5165\u53EA\u652F\u6301\u56FE\u7247\u5E8F\u5217\uFF0C\u8BF7\u4E00\u6B21\u9009\u5165\u591A\u5F20 PNG/JPG/WebP/BMP\u3002", "error");
+    return;
+  }
+  if (files.length === 1 && !isSupportedUploadFile(files[0])) {
+    setStatus("\u53EA\u652F\u6301\u89C6\u9891\u3001GIF \u52A8\u56FE\u3001\u5355\u5F20\u56FE\u7247\u6216\u591A\u56FE\u5E8F\u5217\uFF1A.mp4 / .mov / .mkv / .webm / .gif / .png / .jpg / .jpeg / .webp / .bmp\u3002", "error");
     return;
   }
 
   const form = new FormData();
-  form.append("video", file);
+  files.forEach((file) => {
+    form.append("video", file, file.webkitRelativePath || file.name);
+  });
+  const isSequence = files.length > 1;
 
   setUploadDropzoneBusy(true);
   await withBusy(els.importPathButton, async () => {
     try {
-      setStatus(`\u6b63\u5728\u8F7D\u5165 ${file.name}...`);
+      setStatus(isSequence ? `\u6B63\u5728\u6309\u6587\u4EF6\u540D\u8F7D\u5165 ${files.length} \u5F20\u56FE\u7247...` : `\u6b63\u5728\u8F7D\u5165 ${files[0].name}...`);
       const response = await fetch("/api/upload", {
         method: "POST",
         body: form,
@@ -1203,7 +1295,12 @@ async function uploadSelectedFile(file) {
         throw new Error(data.error || "\u4E0A\u4F20\u5931\u8D25");
       }
       applyUpload(data.upload);
-      setStatus(`\u5DF2\u8F7D\u5165 ${data.upload.display_name}\u3002`, "success");
+      setStatus(
+        isSequence
+          ? `\u5DF2\u6309\u6587\u4EF6\u540D\u987A\u5E8F\u8F7D\u5165 ${data.upload.media_info?.frame_count || files.length} \u5F20\u56FE\u7247\u3002`
+          : `\u5DF2\u8F7D\u5165 ${data.upload.display_name}\u3002`,
+        "success"
+      );
     } finally {
       setUploadDropzoneBusy(false);
       uploadDragDepth = 0;
@@ -1301,27 +1398,36 @@ function syncResultActions() {
   els.invertSelectionButton.disabled = !hasJob;
 }
 
-function applyUpload(upload) {
+function resetSizingControlsForNewUpload() {
+  els.outputScaleInput.value = String(OUTPUT_SCALE_DEFAULT_PERCENT);
+  els.reducePxInput.value = "0";
+}
+
+function applyUpload(upload, { resetSizing = true } = {}) {
   resetPreviewState();
   state.upload = upload;
   state.job = null;
   state.exportResult = null;
   state.processPreview = null;
   state.selected = new Set();
+  if (resetSizing) {
+    resetSizingControlsForNewUpload();
+  }
 
   const info = currentUploadInfo(upload);
   const mediaType = uploadMediaType(upload);
+  const isSequence = mediaType === "image_sequence";
   state.segment.start = 0;
   state.segment.startFrame = 1;
-  state.segment.endFrame = mediaType === "video" ? getSegmentFrameCount(upload) : 1;
+  state.segment.endFrame = mediaType === "video" || isSequence ? getSegmentFrameCount(upload) : 1;
   state.segment.end = mediaType === "video" ? segmentFrameToTime(getSegmentFrameCount(upload), "end", upload) : 0;
   state.segment.confirmed = true;
   normalizeSegment("end");
 
-  els.videoName.textContent = upload.display_name || (mediaType === "image" ? "\u672a\u547d\u540d\u56fe\u7247" : "\u672a\u547d\u540d\u89c6\u9891");
+  els.videoName.textContent = upload.display_name || (mediaType === "image" ? "\u672a\u547d\u540d\u56fe\u7247" : isSequence ? "\u672a\u547d\u540d\u56fe\u7247\u5e8f\u5217" : "\u672a\u547d\u540d\u89c6\u9891");
   els.videoSize.textContent = info.width && info.height ? `${info.width} \u00d7 ${info.height}` : "-";
-  els.videoFps.textContent = mediaType === "image" ? "\u5355\u5e27\u56fe\u7247" : (info.fps ? `${Number(info.fps).toFixed(2)} fps` : "-");
-  els.videoDuration.textContent = mediaType === "image" ? "\u5355\u5f20\u56fe\u7247" : (Number(info.duration || 0) > 0 ? formatSeconds(info.duration) : "-");
+  els.videoFps.textContent = mediaType === "image" ? "\u5355\u5e27\u56fe\u7247" : isSequence ? `${getSegmentFrameCount(upload)} \u5f20\u56fe\u7247` : (info.fps ? `${Number(info.fps).toFixed(2)} fps` : "-");
+  els.videoDuration.textContent = mediaType === "image" ? "\u5355\u5f20\u56fe\u7247" : isSequence ? "\u6309\u6587\u4ef6\u540d\u6392\u5217" : (Number(info.duration || 0) > 0 ? formatSeconds(info.duration) : "-");
 
   els.previewPanel.hidden = false;
   els.processPanel.hidden = false;
@@ -1335,7 +1441,7 @@ function applyUpload(upload) {
   syncAnimationPreview();
 
   const mediaUrl = upload.media_url || upload.video_url;
-  if (mediaType === "image") {
+  if (mediaType === "image" || isSequence) {
     els.videoPreview.pause();
     els.videoPreview.hidden = true;
     els.videoPreview.removeAttribute("src");
@@ -1393,9 +1499,16 @@ function renderProcessPreview() {
   setProcessPreviewStageActive("processed", true);
   els.previewSourceEmpty.hidden = true;
   els.previewProcessedEmpty.hidden = true;
-  els.processPreviewTimeLabel.textContent = isImageUpload()
+  const previewOptions = state.processPreview.options || {};
+  const previewOutputSize = formatSizeLabel(previewOptions.output_width, previewOptions.output_height);
+  const previewTimeLabel = isImageUpload()
     ? "\u5355\u5F20\u56FE\u7247\u9884\u89C8"
+    : isImageSequenceUpload()
+    ? `\u56FE\u7247\u5E8F\u5217\u7B2C ${state.processPreview.sample_frame || state.segment.startFrame || 1} \u5E27`
     : `\u53D6\u6837\u65F6\u95F4 ${formatSeconds(state.processPreview.sample_time || 0)}`;
+  els.processPreviewTimeLabel.textContent = previewOutputSize
+    ? `${previewTimeLabel} / \u8F93\u51FA ${previewOutputSize}`
+    : previewTimeLabel;
   const matte = state.processPreview.matte || { mode: state.processPreview.options?.matte_mode || "chroma" };
   const matteLabel = formatMatteModeLabel(matte);
   const matteDetail = formatMatteDetail(matte);
@@ -1577,14 +1690,15 @@ function renderSegmentControls() {
 function updateSegmentConfirmationUI() {
   const hasUpload = Boolean(state.upload);
   const isImage = isImageUpload();
+  const isSequence = isImageSequenceUpload();
   const startField = els.startRange.closest(".field");
   const endField = els.endRange.closest(".field");
   const segmentSummary = els.segmentLength.closest(".segment-summary");
   if (startField) startField.hidden = isImage;
   if (endField) endField.hidden = isImage;
   if (segmentSummary) segmentSummary.hidden = isImage;
-  els.videoToolbar.hidden = isImage || !hasUpload;
-  els.videoProgress.hidden = isImage || !hasUpload;
+  els.videoToolbar.hidden = !isVideoUpload() || !hasUpload;
+  els.videoProgress.hidden = !isVideoUpload() || !hasUpload;
 
   if (isImage) {
     state.segment.start = 0;
@@ -1593,6 +1707,21 @@ function updateSegmentConfirmationUI() {
     els.segmentConfirmStatus.className = "segment-status image";
     els.segmentConfirmStatus.textContent = "\u5355\u5F20\u56FE\u7247\u6A21\u5F0F";
     els.segmentConfirmHint.textContent = "\u65E0\u9700\u8C03\u6574\u65F6\u95F4\u8303\u56F4\u3002\u5F53\u524D\u53C2\u6570\u4F1A\u76F4\u63A5\u4F5C\u7528\u4E8E\u8FD9 1 \u5E27\u3002";
+    els.previewFrameButton.disabled = !hasUpload;
+    els.processButton.disabled = !hasUpload;
+    els.processStepShell.classList.remove("locked");
+    els.processLockNote.hidden = true;
+    updateVideoProgress(0);
+    return;
+  }
+
+  if (isSequence) {
+    state.segment.confirmed = true;
+    state.segment.startFrame = clampSegmentFrame(state.segment.startFrame);
+    state.segment.endFrame = clampSegmentFrame(state.segment.endFrame);
+    els.segmentConfirmStatus.className = "segment-status confirmed";
+    els.segmentConfirmStatus.textContent = `\u56FE\u7247\u5E8F\u5217 \u7B2C ${state.segment.startFrame} \u5E27 - \u7B2C ${state.segment.endFrame} \u5E27`;
+    els.segmentConfirmHint.textContent = "\u5E8F\u5217\u4F1A\u6309\u6587\u4EF6\u540D\u987A\u5E8F\u5904\u7406\uFF0C\u53EF\u4EE5\u8C03\u6574\u8D77\u6B62\u5E27\u3002\u518D\u6B21\u62D6\u5165\u591A\u56FE\u4F1A\u66FF\u6362\u5F53\u524D\u8F93\u5165\uFF0C\u4E0D\u4F1A\u8FFD\u52A0\u3002";
     els.previewFrameButton.disabled = !hasUpload;
     els.processButton.disabled = !hasUpload;
     els.processStepShell.classList.remove("locked");
@@ -1627,7 +1756,7 @@ function updateSegmentConfirmationUI() {
 
 async function processVideo() {
   if (!state.upload) {
-    setStatus("\u5148\u5BFC\u5165\u89C6\u9891\u6216\u56FE\u7247\uFF0C\u518D\u5904\u7406\u3002", "error");
+    setStatus("\u5148\u5BFC\u5165\u89C6\u9891\u3001\u56FE\u7247\u6216\u591A\u56FE\u5E8F\u5217\uFF0C\u518D\u5904\u7406\u3002", "error");
     return;
   }
 
@@ -1642,6 +1771,8 @@ async function processVideo() {
         ? `\u6B63\u5728\u8FD0\u884C ${matteLabel} \u62A0\u56FE\u3002`
         : isImageUpload()
         ? "\u6B63\u5728\u5904\u7406\u5355\u5F20\u56FE\u7247\u7684\u900F\u660E\u8FB9\u7F18\u548C\u7F29\u653E..."
+        : isImageSequenceUpload()
+        ? "\u6B63\u5728\u6309\u6587\u4EF6\u540D\u987A\u5E8F\u5904\u7406\u56FE\u7247\u5E8F\u5217..."
         : "\u6b63\u5728\u62bd\u5e27\u5e76\u5904\u7406\u900f\u660e\u8fb9\u7f18\uff0c\u8fd9\u4e00\u6b65\u53ef\u80fd\u9700\u8981\u51e0\u5341\u79d2\u3002"
     );
     const data = await apiJson("/api/process", {
@@ -1662,20 +1793,22 @@ async function processVideo() {
 
 async function previewCurrentFrame() {
   if (!state.upload) {
-    setStatus("\u5148\u5BFC\u5165\u89C6\u9891\u6216\u56FE\u7247\uFF0C\u518D\u9884\u89C8\u53C2\u6570\u6548\u679C\u3002", "error");
+    setStatus("\u5148\u5BFC\u5165\u89C6\u9891\u3001\u56FE\u7247\u6216\u591A\u56FE\u5E8F\u5217\uFF0C\u518D\u9884\u89C8\u53C2\u6570\u6548\u679C\u3002", "error");
     return;
   }
 
   const duration = Number(currentUploadInfo().duration || 0);
-  const rawCurrentTime = isImageUpload() ? 0 : Number(els.videoPreview.currentTime || state.segment.start || 0);
-  const segmentStart = isImageUpload() ? 0 : getSegmentPlaybackStartTime();
-  const segmentEnd = isImageUpload() ? 0 : getSegmentPlaybackEndTime();
-  const sampleTime = isImageUpload()
+  const sampleFrame = isImageSequenceUpload() ? clampSegmentFrame(state.segment.startFrame) : 1;
+  const rawCurrentTime = isImageUpload() || isImageSequenceUpload() ? 0 : Number(els.videoPreview.currentTime || state.segment.start || 0);
+  const segmentStart = isImageUpload() || isImageSequenceUpload() ? 0 : getSegmentPlaybackStartTime();
+  const segmentEnd = isImageUpload() || isImageSequenceUpload() ? 0 : getSegmentPlaybackEndTime();
+  const sampleTime = isImageUpload() || isImageSequenceUpload()
     ? 0
     : clamp(rawCurrentTime, segmentStart, Math.max(segmentStart, segmentEnd));
   const payload = {
     ...collectProcessingPayload(),
     sample_time: sampleTime,
+    sample_frame: sampleFrame,
   };
 
   await withBusy(els.previewFrameButton, async () => {
@@ -1686,6 +1819,8 @@ async function previewCurrentFrame() {
         ? `\u6B63\u5728\u9884\u89C8 ${matteLabel} \u62A0\u56FE\u3002`
         : isImageUpload()
         ? "\u6B63\u5728\u5957\u7528\u53C2\u6570\u9884\u89C8\u5355\u5F20\u56FE\u7247..."
+        : isImageSequenceUpload()
+        ? `\u6B63\u5728\u9884\u89C8\u56FE\u7247\u5E8F\u5217\u7B2C ${sampleFrame} \u5E27...`
         : "\u6b63\u5728\u62BD\u53D6\u5F53\u524D\u5E27\u5E76\u5957\u7528\u53C2\u6570..."
     );
     const data = await apiJson("/api/preview-frame", {
@@ -1697,6 +1832,8 @@ async function previewCurrentFrame() {
     setStatus(
       isImageUpload()
         ? `\u5355\u5F20\u56FE\u7247\u9884\u89C8\u5DF2\u66F4\u65B0\uFF0C${formatSourceModeLabel(data.preview.ffmpeg_accel, data.preview.source_media_type)}\u3002`
+        : isImageSequenceUpload()
+        ? `\u56FE\u7247\u5E8F\u5217\u7B2C ${data.preview.sample_frame || sampleFrame} \u5E27\u9884\u89C8\u5DF2\u66F4\u65B0\uFF0C${formatSourceModeLabel(data.preview.ffmpeg_accel, data.preview.source_media_type)}\u3002`
         : `\u5355\u5E27\u9884\u89C8\u5DF2\u66F4\u65B0\uFF0C\u53D6\u6837\u65F6\u95F4 ${formatSeconds(sampleTime)}\uFF0C${formatSourceModeLabel(data.preview.ffmpeg_accel, data.preview.source_media_type)}\u3002`,
       "success"
     );
@@ -1740,6 +1877,29 @@ async function applyGreenToBlackPreview() {
     renderProcessPreview();
     const changed = Number(data.preview?.postprocess?.green_to_black?.changed_pixels || 0);
     setStatus(`\u6B8B\u7EFF\u6D82\u9ED1\u5B8C\u6210\uFF0C\u5904\u7406\u4E86 ${changed.toLocaleString()} \u4E2A\u50CF\u7D20\u3002`, "success");
+  });
+}
+
+async function applyGreenDesaturatePreview() {
+  if (!state.processPreview?.preview_id) {
+    setStatus("\u5148\u9884\u89C8\u5F53\u524D\u5E27\uFF0C\u518D\u5904\u7406\u6B8B\u7559\u7EFF\u8272\u3002", "error");
+    return;
+  }
+
+  await withBusy(els.greenDesaturateButton, async () => {
+    setStatus("\u6B63\u5728\u628A\u9884\u89C8\u56FE\u91CC\u7684\u6B8B\u7559\u7EFF\u8272\u53BB\u9971\u548C...");
+    const data = await apiJson("/api/preview-green-desaturate", {
+      method: "POST",
+      body: {
+        preview_id: state.processPreview.preview_id,
+        threshold: 42,
+        dominance: 24,
+      },
+    });
+    state.processPreview = data.preview;
+    renderProcessPreview();
+    const changed = Number(data.preview?.postprocess?.green_desaturate?.changed_pixels || 0);
+    setStatus(`\u6B8B\u7EFF\u53BB\u9971\u548C\u5B8C\u6210\uFF0C\u5904\u7406\u4E86 ${changed.toLocaleString()} \u4E2A\u50CF\u7D20\u3002`, "success");
   });
 }
 
@@ -1836,7 +1996,7 @@ function triggerFileDownload(url, filename) {
 }
 
 function updateSavePreviewButton() {
-  if (!els.savePreviewButton || !els.greenToBlackButton || !els.semiTransparentToBlackButton || !els.semiTransparentToOpaqueButton) {
+  if (!els.savePreviewButton || !els.greenToBlackButton || !els.greenDesaturateButton || !els.semiTransparentToBlackButton || !els.semiTransparentToOpaqueButton) {
     return;
   }
 
@@ -1845,6 +2005,8 @@ function updateSavePreviewButton() {
   const canPostprocess = Boolean(state.upload && isSameUpload && state.processPreview?.preview_id);
   els.greenToBlackButton.hidden = !state.upload;
   els.greenToBlackButton.disabled = !canPostprocess;
+  els.greenDesaturateButton.hidden = !state.upload;
+  els.greenDesaturateButton.disabled = !canPostprocess;
   els.semiTransparentToBlackButton.hidden = !state.upload;
   els.semiTransparentToBlackButton.disabled = !canPostprocess;
   els.semiTransparentToOpaqueButton.hidden = !state.upload;
@@ -1866,9 +2028,15 @@ function renderJob() {
   const sourceMediaType = state.job.source_media_type || uploadMediaType();
   const outputWidth = options.output_width || options.target_size || "-";
   const outputHeight = options.output_height || options.target_size || "-";
+  const sourceHeight = Number(state.job.video_info?.height || 0);
+  const legacyOutputScale = sourceHeight && options.target_size ? Number(options.target_size) / sourceHeight : 0;
+  const outputScaleLabel = formatOutputScaleLabel(options.output_scale || legacyOutputScale);
   const isCustomAnimation = sourceMediaType === "animation";
+  const isImageSequence = sourceMediaType === "image_sequence";
   const segmentLabel = isCustomAnimation
     ? "\u81EA\u5B9A\u4E49\u52A8\u753B\u5E27\u5E8F\u5217"
+    : isImageSequence
+    ? `\u56FE\u7247\u5E8F\u5217\uFF1A\u7B2C ${options.start_frame || 1} - ${options.end_frame || state.job.frame_count} \u5E27`
     : sourceMediaType === "image"
     ? "\u5355\u5F20\u56FE\u7247\u8F93\u5165"
     : `${formatSeconds(options.start_time || 0)} - ${formatSeconds(options.end_time || 0)}`;
@@ -1879,9 +2047,10 @@ function renderJob() {
     summaryCard("\u8f93\u51fa\u5e27\u6570", `${state.job.frame_count} \u5e27`),
     summaryCard("\u53D6\u6837\u65B9\u5F0F", escapeHtml(formatSourceModeLabel(state.job.ffmpeg_accel, sourceMediaType))),
     summaryCard("\u62A0\u56FE\u6A21\u5F0F", escapeHtml(`${formatMatteModeLabel(matte)}${matteDetail ? ` / ${matteDetail}` : ""}`)),
+    summaryCard("\u8F93\u51FA\u500D\u6570", escapeHtml(outputScaleLabel)),
     summaryCard("\u8F93\u51FA\u753B\u5E03", `${outputWidth} \u00d7 ${outputHeight}`),
     summaryCard("\u753B\u5E03\u5E03\u5C40", escapeHtml(formatCanvasModeLabel(options.canvas_mode))),
-    summaryCard("\u62BD\u5E27\u95F4\u9694", isCustomAnimation ? "\u6309\u6587\u4EF6\u540D\u987A\u5E8F" : sourceMediaType === "image" ? "\u5355\u5F20\u56FE\u7247" : `\u6BCF ${options.keep_every || 1} \u5E27\u4FDD\u7559\u4E00\u5F20`),
+    summaryCard("\u62BD\u5E27\u95F4\u9694", isCustomAnimation || isImageSequence ? "\u6309\u6587\u4EF6\u540D\u987A\u5E8F" : sourceMediaType === "image" ? "\u5355\u5F20\u56FE\u7247" : `\u6BCF ${options.keep_every || 1} \u5E27\u4FDD\u7559\u4E00\u5F20`),
     summaryCard("\u8F93\u5165\u533A\u95F4", segmentLabel),
   ];
   if (matte.mode === "chroma") {
@@ -1975,6 +2144,9 @@ function getSegmentFrameCount(upload = state.upload) {
   if (isImageUpload(upload)) {
     return 1;
   }
+  if (isImageSequenceUpload(upload)) {
+    return Math.max(1, Math.round(Number(currentUploadInfo(upload).frame_count || 1)));
+  }
 
   const fps = getSegmentFrameRate(upload);
   const duration = Math.max(Number(currentUploadInfo(upload).duration || 0), 0);
@@ -1994,6 +2166,11 @@ function syncSegmentFramesFromTimes(upload = state.upload) {
     state.segment.endFrame = 1;
     return;
   }
+  if (isImageSequenceUpload(upload)) {
+    state.segment.startFrame = clampSegmentFrame(state.segment.startFrame, upload);
+    state.segment.endFrame = clampSegmentFrame(state.segment.endFrame, upload);
+    return;
+  }
 
   state.segment.startFrame = timeToSegmentFrame(state.segment.start, "start", upload);
   state.segment.endFrame = timeToSegmentFrame(state.segment.end, "end", upload);
@@ -2007,6 +2184,13 @@ function syncSegmentTimesFromFrames(upload = state.upload) {
     state.segment.endFrame = 1;
     return;
   }
+  if (isImageSequenceUpload(upload)) {
+    state.segment.start = 0;
+    state.segment.end = 0;
+    state.segment.startFrame = clampSegmentFrame(state.segment.startFrame, upload);
+    state.segment.endFrame = clampSegmentFrame(state.segment.endFrame, upload);
+    return;
+  }
 
   state.segment.startFrame = clampSegmentFrame(state.segment.startFrame, upload);
   state.segment.endFrame = clampSegmentFrame(state.segment.endFrame, upload);
@@ -2017,6 +2201,9 @@ function syncSegmentTimesFromFrames(upload = state.upload) {
 function timeToSegmentFrame(value, key, upload = state.upload) {
   if (isImageUpload(upload)) {
     return 1;
+  }
+  if (isImageSequenceUpload(upload)) {
+    return clampSegmentFrame(key === "start" ? state.segment.startFrame : state.segment.endFrame, upload);
   }
 
   const step = getSegmentFrameStep(upload);
@@ -2029,6 +2216,9 @@ function segmentFrameToTime(frame, key, upload = state.upload) {
   if (isImageUpload(upload)) {
     return 0;
   }
+  if (isImageSequenceUpload(upload)) {
+    return 0;
+  }
 
   const clampedFrame = clampSegmentFrame(frame, upload);
   const step = getSegmentFrameStep(upload);
@@ -2037,12 +2227,20 @@ function segmentFrameToTime(frame, key, upload = state.upload) {
 }
 
 function getSegmentFrameValue(key, upload = state.upload) {
+  if (isImageSequenceUpload(upload)) {
+    return clampSegmentFrame(key === "start" ? state.segment.startFrame : state.segment.endFrame, upload);
+  }
   return timeToSegmentFrame(key === "start" ? state.segment.start : state.segment.end, key, upload);
 }
 
 function getSelectedSegmentFrameCount(upload = state.upload) {
   if (isImageUpload(upload)) {
     return 1;
+  }
+  if (isImageSequenceUpload(upload)) {
+    const startFrame = clampSegmentFrame(state.segment.startFrame, upload);
+    const endFrame = clampSegmentFrame(state.segment.endFrame, upload);
+    return Math.max(1, endFrame - startFrame + 1);
   }
   const startFrame = getSegmentFrameValue("start", upload);
   const endFrame = getSegmentFrameValue("end", upload);
@@ -2054,7 +2252,7 @@ function formatSegmentStep(upload = state.upload) {
 }
 
 function snapSegmentTime(value, mode = "round", upload = state.upload) {
-  if (isImageUpload(upload)) {
+  if (isImageUpload(upload) || isImageSequenceUpload(upload)) {
     return 0;
   }
 
@@ -2400,7 +2598,6 @@ async function exportFrames() {
       body: {
         job_id: state.job.job_id,
         selected_indices: selectedFrames.map((frame) => frame.index),
-        sheet_columns: Number(els.sheetColumnsInput.value || 4),
         video_duration_ms: Number(els.previewIntervalInput.value || 100),
       },
     });
@@ -2418,28 +2615,26 @@ function renderExportResult() {
   }
 
   els.exportResult.hidden = false;
+  const videoName = escapeHtml(state.exportResult.video_name || "animation.mov");
   const videoLink = state.exportResult.video_url
-    ? `<a href="${state.exportResult.video_url}" target="_blank" rel="noopener">animation.mov</a>`
+    ? `<a href="${state.exportResult.video_url}" target="_blank" rel="noopener">${videoName}</a>`
     : "";
 
   els.exportResult.innerHTML = `
     <div class="result-summary">
       ${summaryCard("\u5bfc\u51fa\u5e27\u6570", `${state.exportResult.frame_count} \u5e27`)}
-      ${summaryCard("\u5bfc\u51fa\u5185\u5bb9", "PNG \u5e27 / \u900f\u660e MOV / sprite sheet / zip / manifest")}
+      ${summaryCard("\u5bfc\u51fa\u5185\u5bb9", "frames \u6587\u4ef6\u5939 / \u900f\u660e MOV")}
     </div>
     <div class="link-list">
-      <button id="openExportDirButton" class="ghost-button" type="button">\u6253\u5f00\u5bfc\u51fa\u76ee\u5f55</button>
+      <button id="openFramesDirButton" class="ghost-button" type="button">\u6253\u5f00 frames \u6587\u4ef6\u5939</button>
       ${videoLink}
-      <a href="${state.exportResult.zip_url}" target="_blank" rel="noopener">frames.zip</a>
-      <a href="${state.exportResult.sheet_url}" target="_blank" rel="noopener">sprite_sheet.png</a>
-      <a href="${state.exportResult.manifest_url}" target="_blank" rel="noopener">export.json</a>
     </div>
   `;
 
-  const openExportDirButton = document.getElementById("openExportDirButton");
-  if (openExportDirButton) {
-    openExportDirButton.addEventListener("click", async () => {
-      await openPath(state.exportResult.output_dir);
+  const openFramesDirButton = document.getElementById("openFramesDirButton");
+  if (openFramesDirButton) {
+    openFramesDirButton.addEventListener("click", async () => {
+      await openPath(state.exportResult.frames_dir || state.exportResult.output_dir);
     });
   }
   persistSession();
@@ -2483,11 +2678,12 @@ function updateChromaVisibility() {
   const isLuma = chromaEnabled && matteModeUsesLuma(matteMode);
   const isCorridor = chromaEnabled && matteModeUsesCorridorKey(matteMode);
   const usesSpillControls = chromaEnabled;
+  const usesKeyColorControls = chromaEnabled && matteModeUsesChromaSeed(matteMode);
   const isManual = els.keyModeInput.value === "manual";
   els.corridorEnabledInput.checked = isCorridor;
   els.matteModeInput.disabled = !els.chromaEnabledInput.checked;
-  els.keyModeInput.closest(".field").style.display = usesSpillControls ? "" : "none";
-  els.manualColorField.style.display = usesSpillControls && isManual ? "" : "none";
+  els.keyModeInput.closest(".field").style.display = usesKeyColorControls ? "" : "none";
+  els.manualColorField.style.display = usesKeyColorControls && isManual ? "" : "none";
   document.querySelectorAll(".chroma-only").forEach((node) => {
     node.style.display = isChroma ? "" : "none";
   });

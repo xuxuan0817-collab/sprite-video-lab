@@ -4,15 +4,19 @@ Sprite Video Lab 是一个本地网页工具，用来把视频片段、单张图
 
 它适合这些工作流：
 
-- 导入本地视频、GIF 动图、图片或动画序列帧。
+- 导入本地视频、GIF 动图、单张图片或一次性多图序列帧。
 - 截取有用的帧范围。
 - 按固定间隔抽帧。
 - 去除纯色背景、绿幕/蓝幕背景或 AI 生成背景。
 - 用 Luma 保留发光、火焰、闪电、粒子等亮部特效。
 - 统一帧尺寸，支持自动宽度画布或方形落地/居中画布。
-- 导出透明 PNG 帧、Sprite Sheet、JSON manifest 和 zip 包。
+- 导出 frames 文件夹和自动时间命名的透明 MOV。
 
 项目优先服务 Windows 本地工作流，但运行时很轻：Python、Pillow、ffmpeg，以及原生 HTML/CSS/JavaScript。
+
+## 界面全貌
+
+![Sprite Video Lab 全页滚动截图](./docs/svl-full-page.png)
 
 ## 功能
 
@@ -27,12 +31,12 @@ Sprite Video Lab 是一个本地网页工具，用来把视频片段、单张图
 - BiRefNet 与 Luma/CorridorKey 可选择“补亮部/精修边缘”或“收紧抠图”两类组合方式。
 - 主体保护预设，减少 BiRefNet/Luma 把主体内部抠成半透明的问题。
 - 单帧预览支持原始抽帧全分辨率查看，处理后预览可切换棋盘格或指定纯色背景。
-- 预览和批处理后处理：残绿涂黑、半透明像素涂黑。
+- 预览和批处理后处理：残绿涂黑、残绿去饱和、半透明像素涂黑、半透明像素转不透明。
 - BiRefNet 弱蒙版会自动回退到 general 模型，避免小尺寸插画/GIF 被抠成全透明。
 - 可直接导入已有动画序列帧，按文件名顺序预览和导出。
 - 实验性线稿清理页：支持 Lanczos 缩小和 Real-ESRGAN anime 整线后缩小。
 - 反向动画预览和反向导出。
-- 帧选择、动画预览、Sprite Sheet 导出、zip 导出和 JSON manifest 导出。
+- 帧选择、动画预览、frames 文件夹导出和自动时间命名的透明 MOV 导出。
 
 ## 抠图模式
 

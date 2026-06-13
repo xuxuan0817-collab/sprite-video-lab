@@ -46,9 +46,9 @@ The UI is organized into four steps: import media, preview and trim, extract and
 You can import media in two ways:
 
 - Paste a full local video/image path and click `Import Path`.
-- Drag a file into the upload area, or click the upload area and choose a file.
+- Drag files into the upload area, or click the upload area and choose files. Image sequences must be imported in one batch; the app sorts frames by filename. Importing again replaces the current input instead of appending.
 
-After import, the app shows the media name, resolution, frame rate, and duration. Images are treated as single-frame sources.
+After import, the app shows the media name, resolution, frame rate, and duration. Single images are treated as one-frame sources. Image sequences show their frame count and can be trimmed by frame range.
 
 Tips:
 
@@ -82,17 +82,17 @@ This controls sampling density:
 
 If the exported animation feels jumpy, lower this value.
 
-### Target Height
+### Output Scale
 
-The app scales the sprite so the output content fits the target height.
+The default is `100%`, so the output canvas height automatically matches the input media height. Use `75%`, `50%`, `25%`, or another percentage when you intentionally want smaller, lower-resolution output.
 
 Common values:
 
-- Small pixel-art characters: `64`, `96`, `128`
-- Medium character actions: `192`, `256`
-- Large VFX or high-resolution assets: `512` and above
+- Original size: `100%`
+- Light reduction: `75%`
+- Smaller files: `50%` or `25%`
 
-Larger target heights increase processing time and file size.
+Larger output scales increase processing time and file size.
 
 ### Canvas Layout
 
@@ -106,7 +106,7 @@ If the character appears to jump around in animation preview, increase padding o
 
 ### Canvas Padding
 
-Padding adds extra transparent space around the subject.
+The default is `0`, which preserves the input size. Increase padding only when motion, weapons, or glow need extra transparent space.
 
 Typical ranges:
 
@@ -114,7 +114,7 @@ Typical ranges:
 - Attacks and weapon swings: `16` to `32`
 - Large glow, particles, explosions: `32` or more
 
-Too little padding clips motion. Too much padding wastes sprite sheet space.
+Too much padding increases the size of the exported frames and MOV.
 
 ## Choosing A Matting Mode
 
@@ -196,7 +196,7 @@ Clicking a preset automatically:
 - Switches to `BiRefNet + Luma`.
 - Disables CorridorKey.
 - Sets Halo to `0`.
-- Raises AI edge resolution.
+- Sets AI edge resolution to `Auto (quality first)`.
 - Applies a tuned group of Luma settings.
 
 Recommended use:
@@ -250,7 +250,7 @@ Steps:
 2. Set Matting mode to `BiRefNet`.
 3. For the BiRefNet model, start with `BiRefNet HR-matting`; use `lite-2K` only when memory or speed is tight.
 4. Keep AI device on `auto`; switch to `cpu` only if GPU fails.
-5. Set AI edge resolution to `1024` first. Try `1536`, `2048`, or `2560` if edges need more detail.
+5. Keep AI edge resolution on `Auto (quality first)`.
 6. Move to the hardest frame and click `Preview current frame`.
 7. If the subject is complete and the edge is acceptable, click `Start processing`.
 
@@ -258,8 +258,8 @@ BiRefNet tuning:
 
 | Symptom | What to change |
 | --- | --- |
-| Edge is blurry, hair or contour detail is missing | Raise AI edge resolution, for example from `1024` to `2048` |
-| Processing is too slow or runs out of memory | Lower AI edge resolution, use `lite-2K`, or switch device to `cpu` |
+| Edge is blurry, hair or contour detail is missing | Keep `Auto (quality first)`; if you lowered it manually, switch back to auto |
+| Processing is too slow or runs out of memory | Lower AI edge resolution manually, use `lite-2K`, or switch device to `cpu` |
 | Holes appear inside the subject | Use `BiRefNet + Luma`, then apply a subject-protection preset |
 | Glow, fire, lightning trails disappear | Use `BiRefNet + Luma` |
 | Large background areas remain | Check the selected frame/range first; if subject and background are visually mixed, try another preview frame or use solid-color keying |
@@ -273,7 +273,7 @@ Steps:
 1. Set Matting mode to `BiRefNet + Luma`.
 2. Set Halo to `0` first so glow edges are not contracted.
 3. Leave CorridorKey off unless the source is a true green/blue screen.
-4. Set AI edge resolution to `1024` or `1536`; try `2048` for high-resolution VFX.
+4. Keep AI edge resolution on `Auto (quality first)`.
 5. Click `Preview current frame`.
 6. Tune Luma black point, white point, gamma, and strength from the preview.
 7. Process the full range only after the preview is good.
@@ -352,7 +352,7 @@ CorridorKey troubleshooting:
 | --- | --- |
 | Green/blue edge remains | Choose screen type manually, raise despill, optionally add Halo `1` |
 | Edge is eaten away | Lower threshold or Halo so the base alpha is more complete |
-| Processing is slow | Lower target height or AI edge resolution; confirm with preview first |
+| Processing is slow | Lower output scale or lower AI edge resolution manually; confirm with preview first |
 | Result is worse than without it | Turn CorridorKey off and use normal despill plus post-processing |
 
 ### Recommended Full Workflow
@@ -433,16 +433,14 @@ You can adjust:
 
 ### Export
 
-Set the sprite sheet column count, then click `Export selected frames`.
+Click `Export selected frames`.
 
 Exported outputs include:
 
 - `frames/`: transparent PNG frame sequence.
-- `sprite_sheet.png`: packed sprite sheet.
-- `frames.zip`: zipped frame files.
-- `export.json`: manifest with frame order, dimensions, and sheet metadata.
+- `animation-YYYYMMDD-HHMMSS.mov`: transparent QuickTime MOV with alpha.
 
-When reverse export is enabled, the frame sequence, sprite sheet, and manifest all use the reversed selected-frame order.
+When reverse export is enabled, both `frames/` and the MOV use the reversed selected-frame order.
 
 ## Common Settings
 
@@ -461,7 +459,7 @@ When reverse export is enabled, the frame sequence, sprite sheet, and manifest a
 - Matting mode: `BiRefNet`
 - AI model: `BiRefNet HR-matting`
 - AI device: `auto`
-- AI edge resolution: `1024` to `2048`
+- AI edge resolution: `Auto (quality first)`
 - If the interior becomes transparent: use `BiRefNet + Luma` and a subject-protection preset
 
 ### Fire, Lightning, Particles
@@ -496,7 +494,7 @@ work/
   uploads/    Imported media copies
   previews/   Single-frame preview outputs
   jobs/       Processed frame jobs
-  exports/    Export packages, sprite sheets, and manifests
+  exports/    Exported frames folders and transparent MOV files
 ```
 
 `work/` is ignored by git.
@@ -531,9 +529,9 @@ Try this order:
 
 White edges often come from RGB values in semi-transparent pixels. Try `Semi-transparent to black`, but preview it on both light and dark backgrounds first.
 
-### Sprite Sheet Is Too Large
+### Exported Files Are Too Large
 
-- Lower target height.
+- Lower output scale.
 - Increase `Keep every N frames`.
 - Reduce padding.
 - Uncheck unnecessary frames.
@@ -548,5 +546,5 @@ Enable `Reverse playback/export` in Step 4, confirm the preview, then export aga
 - Always tune with single-frame preview before processing a long range.
 - Preview the most difficult frame: dirty edges, complex light, or heavy motion.
 - Check the result on different preview background colors before export.
-- Keep target height, canvas layout, and padding consistent for a batch of related sprites.
-- Keep `export.json` with important assets so you can inspect frame order and export metadata later.
+- Keep output scale, canvas layout, and padding consistent for a batch of related sprites.
+- Keep the whole export directory for important assets; `frames/` and the transparent MOV are enough to reuse.

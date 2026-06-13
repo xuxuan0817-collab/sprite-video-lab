@@ -12,7 +12,6 @@ import subprocess
 import sys
 import time
 import uuid
-import zipfile
 from datetime import datetime
 from fractions import Fraction
 from http import HTTPStatus
@@ -110,9 +109,12 @@ AI_MATTE_DEVICE_ALIASES = {
 }
 DEFAULT_AI_MATTE_MODEL = "birefnet-hr-matting"
 DEFAULT_AI_MATTE_RESOLUTION = 1024
+AI_MATTE_RESOLUTION_AUTO = "auto"
 AI_MATTE_MIN_RESOLUTION = 256
 AI_MATTE_MAX_RESOLUTION = 2560
 AI_MATTE_RESOLUTION_MULTIPLE = 32
+OUTPUT_SCALE_MIN = 0.05
+OUTPUT_SCALE_MAX = 2.0
 CORRIDORKEY_REPO_URL = "https://github.com/nikopueringer/CorridorKey"
 CORRIDORKEY_IMG_SIZE = 2048
 CORRIDORKEY_GPU_DESPECKLE_PIXEL_LIMIT = 2**24
@@ -258,12 +260,63 @@ def normalize_ai_resolution(value) -> int:
     return max(AI_MATTE_MIN_RESOLUTION, min(AI_MATTE_MAX_RESOLUTION, aligned))
 
 
+def is_auto_ai_resolution(value) -> bool:
+    return str(value or "").strip().lower() in {"", AI_MATTE_RESOLUTION_AUTO}
+
+
+def auto_ai_resolution_for_image(image: Image.Image) -> int:
+    width, height = image.size
+    long_edge = max(width, height, DEFAULT_AI_MATTE_RESOLUTION)
+    return normalize_ai_resolution(min(long_edge, AI_MATTE_MAX_RESOLUTION))
+
+
+def resolve_ai_resolution(value, image: Image.Image) -> int:
+    if is_auto_ai_resolution(value):
+        return auto_ai_resolution_for_image(image)
+    return normalize_ai_resolution(value)
+
+
 def clamp_float(value: float, minimum: float, maximum: float) -> float:
     return min(maximum, max(minimum, value))
 
 
 def clamp_int(value: int, minimum: int, maximum: int) -> int:
     return min(maximum, max(minimum, value))
+
+
+def normalize_output_scale(value) -> float:
+    return clamp_float(safe_float(value, 1.0), OUTPUT_SCALE_MIN, OUTPUT_SCALE_MAX)
+
+
+def payload_has_value(payload: dict, key: str) -> bool:
+    if key not in payload or payload.get(key) is None:
+        return False
+    return str(payload.get(key)).strip() != ""
+
+
+def output_scale_from_payload(payload: dict, info: dict | None = None) -> float:
+    if payload_has_value(payload, "output_scale"):
+        return normalize_output_scale(payload.get("output_scale"))
+    target_size = safe_int(payload.get("target_size"), 0)
+    source_height = safe_int((info or {}).get("height"), 0)
+    if target_size > 0 and source_height > 0:
+        return normalize_output_scale(target_size / source_height)
+    return 1.0
+
+
+def output_scale_from_upload_payload(upload_id: str, payload: dict) -> float:
+    if payload_has_value(payload, "output_scale"):
+        return normalize_output_scale(payload.get("output_scale"))
+    source_path, media_type = source_media_entry(upload_id)
+    if media_type in {"image", "image_sequence"}:
+        return 1.0
+    if payload_has_value(payload, "target_size"):
+        return output_scale_from_payload(payload, upload_media_info(upload_id, source_path, media_type))
+    return 1.0
+
+
+def target_size_from_source_height(source_height: int, output_scale: float) -> int:
+    return max(8, round(max(1, source_height) * normalize_output_scale(output_scale)))
 
 
 def normalize_matte_mode(raw: str, chroma_enabled: bool) -> str:
@@ -484,6 +537,17 @@ def custom_animation_payload() -> dict:
     }
 
 
+def image_sequence_payload() -> dict:
+    return {
+        "requested_mode": "image_sequence",
+        "selected_mode": "",
+        "used_mode": "image_sequence",
+        "used_label": "Image sequence",
+        "fallback_to_cpu": False,
+        "fallback_reason": "",
+    }
+
+
 def run_ffmpeg_with_auto_accel(args_builder) -> dict:
     requested_mode, selected_mode = preferred_ffmpeg_hwaccel()
     if selected_mode:
@@ -541,6 +605,29 @@ def current_app_version() -> str:
     if not mtimes:
         return "0"
     return max(mtimes)
+
+
+def runtime_info() -> dict:
+    torch_info = {"installed": False, "version": "", "cuda_available": False, "error": ""}
+    try:
+        import torch
+
+        torch_info = {
+            "installed": True,
+            "version": str(getattr(torch, "__version__", "")),
+            "cuda_available": bool(torch.cuda.is_available()),
+            "error": "",
+        }
+    except Exception as exc:
+        torch_info["error"] = str(exc)
+
+    return {
+        "python_executable": sys.executable,
+        "python_prefix": sys.prefix,
+        "torch": torch_info,
+        "ai_model_cache": str(default_ai_model_cache_dir()),
+        "corridorkey_root": str(default_corridorkey_root()),
+    }
 
 
 def watch_snapshot() -> dict[str, int]:
@@ -782,6 +869,57 @@ def source_media_entry(upload_id: str) -> tuple[Path, str]:
     return path, media_type
 
 
+def source_frame_entries(upload_id: str) -> list[dict]:
+    manifest = load_upload_manifest(upload_id)
+    entries = manifest.get("source_frames") or []
+    if entries:
+        result = []
+        for index, entry in enumerate(entries):
+            path = repair_mojibake_path(Path(str(entry.get("path") or "")))
+            if not path.exists():
+                raise FileNotFoundError(f"source frame missing: {path}")
+            result.append(
+                {
+                    "path": path,
+                    "name": str(entry.get("name") or path.name),
+                    "index": index,
+                }
+            )
+        return result
+
+    path, _ = source_media_entry(upload_id)
+    return [{"path": path, "name": path.name, "index": 0}]
+
+
+def image_sequence_info(entries: list[dict]) -> dict:
+    max_width = 0
+    max_height = 0
+    total_bytes = 0
+    for entry in entries:
+        path = Path(entry["path"])
+        with Image.open(path) as image:
+            width, height = image.size
+        max_width = max(max_width, width)
+        max_height = max(max_height, height)
+        total_bytes += path.stat().st_size
+    return {
+        "width": max_width,
+        "height": max_height,
+        "fps": 0.0,
+        "duration": 0.0,
+        "codec": "image-sequence",
+        "frame_count": len(entries),
+        "bytes": total_bytes,
+        "media_type": "image_sequence",
+    }
+
+
+def upload_media_info(upload_id: str, source_path: Path, media_type: str) -> dict:
+    if media_type == "image_sequence":
+        return image_sequence_info(source_frame_entries(upload_id))
+    return media_info(source_path, media_type)
+
+
 def source_video_path(upload_id: str) -> Path:
     manifest = load_upload_manifest(upload_id)
     preview_path = str(manifest.get("preview_path") or "").strip()
@@ -799,9 +937,11 @@ def build_upload_payload(
     display_name: str,
     media_type: str,
     preview_path: Path | None = None,
+    media_info_payload: dict | None = None,
 ) -> dict:
     info_path = preview_path if preview_path and preview_path.exists() and media_type == "video" else source_path
-    info = media_info(info_path, media_type)
+    info = media_info_payload or media_info(info_path, media_type)
+    info["media_type"] = media_type
     return {
         "upload_id": upload_id,
         "display_name": display_name,
@@ -905,6 +1045,94 @@ def register_uploaded_file(file_item) -> dict:
     }
     save_upload_manifest(upload_id, manifest)
     return build_upload_payload(upload_id, target_path, filename, media_type, preview_path)
+
+
+def register_uploaded_image_sequence(file_items: list) -> dict:
+    candidates = []
+    for item in file_items:
+        raw_filename = str(getattr(item, "filename", "") or "frame")
+        display_name = Path(raw_filename.replace("\\", "/")).name or "frame"
+        if not getattr(item, "file", None):
+            continue
+        suffix = Path(display_name).suffix.lower()
+        content_type = str(getattr(item, "type", "") or "")
+        if suffix not in IMAGE_EXTENSIONS and not content_type.startswith("image/"):
+            raise ValueError("multiple-file import only supports image sequences")
+        candidates.append((raw_filename, display_name, item))
+
+    candidates.sort(key=lambda pair: natural_sort_key(pair[0]))
+    if len(candidates) < 2:
+        raise ValueError("image sequence import needs at least 2 image files")
+
+    upload_id = timestamped_id()
+    target_dir = upload_dir(upload_id)
+    frames_dir = target_dir / "frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+
+    source_frames: list[dict] = []
+    max_width = 0
+    max_height = 0
+    total_bytes = 0
+    first_path: Path | None = None
+    for index, (raw_filename, display_name, item) in enumerate(candidates):
+        suffix = Path(display_name).suffix.lower()
+        content_type = str(getattr(item, "type", "") or "")
+        extension = suffix if suffix in IMAGE_EXTENSIONS else content_type_extension(content_type) or ".png"
+        frame_name = f"frame_{index + 1:05d}{extension}"
+        target_path = frames_dir / frame_name
+        with target_path.open("wb") as handle:
+            shutil.copyfileobj(item.file, handle)
+        with Image.open(target_path) as image:
+            width, height = image.size
+            max_width = max(max_width, width)
+            max_height = max(max_height, height)
+        total_bytes += target_path.stat().st_size
+        if first_path is None:
+            first_path = target_path
+        source_frames.append(
+            {
+                "index": index,
+                "name": display_name,
+                "raw_name": raw_filename,
+                "path": str(target_path),
+                "width": width,
+                "height": height,
+            }
+        )
+
+    if first_path is None:
+        raise ValueError("no supported image frames found")
+
+    display_name = f"{len(source_frames)} images ({source_frames[0]['name']} ... {source_frames[-1]['name']})"
+    info = {
+        "width": max_width,
+        "height": max_height,
+        "fps": 0.0,
+        "duration": 0.0,
+        "codec": "image-sequence",
+        "frame_count": len(source_frames),
+        "bytes": total_bytes,
+        "media_type": "image_sequence",
+    }
+    manifest = {
+        "source_path": str(first_path),
+        "preview_path": "",
+        "display_name": display_name,
+        "media_type": "image_sequence",
+        "source_frames": source_frames,
+        "created_at": iso_now(),
+    }
+    save_upload_manifest(upload_id, manifest)
+    return build_upload_payload(upload_id, first_path, display_name, "image_sequence", media_info_payload=info)
+
+
+def register_uploaded_media(file_items: list) -> dict:
+    items = [item for item in file_items if getattr(item, "file", None)]
+    if not items:
+        raise ValueError("media file missing")
+    if len(items) == 1:
+        return register_uploaded_file(items[0])
+    return register_uploaded_image_sequence(items)
 
 
 def auto_key_color(image: Image.Image) -> tuple[int, int, int]:
@@ -1334,10 +1562,10 @@ def birefnet_alpha_mask(
     image: Image.Image,
     model_key: str,
     requested_device: str,
-    inference_resolution: int,
+    inference_resolution: int | str | None,
 ) -> tuple[Image.Image, dict]:
     normalized_model_key = normalize_ai_model_key(model_key)
-    resolution = normalize_ai_resolution(inference_resolution)
+    resolution = resolve_ai_resolution(inference_resolution, image)
     mask, info = run_birefnet_inference(image, normalized_model_key, requested_device, resolution)
     score = birefnet_mask_score(mask)
     info["mask_score"] = score
@@ -1455,7 +1683,7 @@ def apply_matte_pipeline(
     halo_pixels: int,
     ai_model: str,
     ai_device: str,
-    ai_resolution: int,
+    ai_resolution: int | str | None,
     luma_black: int,
     luma_white: int,
     luma_gamma: float,
@@ -1665,6 +1893,38 @@ def stable_resize_frames(
     return rendered, bboxes, scale, canvas_size
 
 
+def should_preserve_source_canvas(media_type: str, reduce_px: int, canvas_mode: str) -> bool:
+    return media_type in {"image", "image_sequence"} and reduce_px <= 0 and normalize_canvas_mode(canvas_mode) == "auto"
+
+
+def resize_frames_on_source_canvas(
+    keyed_frames: list[Image.Image],
+    output_scale: float,
+    hard_alpha: bool = False,
+) -> tuple[list[Image.Image], list[tuple[int, int, int, int] | None], float, tuple[int, int]]:
+    bboxes = [frame.getchannel("A").getbbox() for frame in keyed_frames]
+    if not any(box is not None for box in bboxes):
+        raise RuntimeError("all frames became transparent after chroma key")
+
+    scale = normalize_output_scale(output_scale)
+    rendered: list[Image.Image] = []
+    max_width = 0
+    max_height = 0
+    for frame in keyed_frames:
+        target_size = (
+            max(1, round(frame.width * scale)),
+            max(1, round(frame.height * scale)),
+        )
+        resized = frame.copy() if target_size == frame.size else resize_rgba_with_premultiplied_alpha(frame, target_size)
+        if hard_alpha:
+            resized = enforce_hard_alpha(resized)
+        rendered.append(resized)
+        max_width = max(max_width, resized.width)
+        max_height = max(max_height, resized.height)
+
+    return rendered, bboxes, scale, (max_width, max_height)
+
+
 def job_dir(job_id: str) -> Path:
     return JOBS_DIR / job_id
 
@@ -1747,6 +2007,36 @@ def extract_single_frame(source_path: Path, output_path: Path, sample_time: floa
     return output_path, accel
 
 
+def copy_sequence_frames(
+    upload_id: str,
+    raw_dir: Path,
+    start_frame: int,
+    end_frame: int,
+) -> tuple[list[Path], list[dict]]:
+    entries = source_frame_entries(upload_id)
+    frame_count = len(entries)
+    start_index = clamp_int(int(start_frame or 1), 1, frame_count) - 1
+    end_index = clamp_int(int(end_frame or frame_count), 1, frame_count) - 1
+    if end_index < start_index:
+        end_index = start_index
+
+    if raw_dir.exists():
+        shutil.rmtree(raw_dir)
+    raw_dir.mkdir(parents=True, exist_ok=True)
+
+    raw_paths: list[Path] = []
+    selected_entries: list[dict] = []
+    for output_index, entry in enumerate(entries[start_index : end_index + 1]):
+        raw_path = raw_dir / f"frame_{output_index + 1:05d}.png"
+        with Image.open(entry["path"]) as image:
+            image.convert("RGBA").save(raw_path)
+        raw_paths.append(raw_path)
+        selected_entries.append(entry)
+    if not raw_paths:
+        raise RuntimeError("no image sequence frames selected")
+    return raw_paths, selected_entries
+
+
 def process_video_to_job(
     upload_id: str,
     start_time: float,
@@ -1754,7 +2044,7 @@ def process_video_to_job(
     start_frame: int,
     end_frame: int,
     keep_every: int,
-    target_size: int,
+    output_scale: float,
     reduce_px: int,
     canvas_mode: str,
     chroma_enabled: bool,
@@ -1767,7 +2057,7 @@ def process_video_to_job(
     halo_pixels: int,
     ai_model: str,
     ai_device: str,
-    ai_resolution: int,
+    ai_resolution: int | str | None,
     luma_black: int,
     luma_white: int,
     luma_gamma: float,
@@ -1775,11 +2065,12 @@ def process_video_to_job(
     corridorkey_enabled: bool,
     corridorkey_screen: str,
     batch_green_to_black: bool = False,
+    batch_green_desaturate: bool = False,
     batch_semitransparent_to_black: bool = False,
     batch_semitransparent_to_opaque: bool = False,
 ) -> dict:
     source_path, media_type = source_media_entry(upload_id)
-    info = media_info(source_path, media_type)
+    info = upload_media_info(upload_id, source_path, media_type)
     start_time = max(0.0, start_time)
     duration = safe_float(info.get("duration"), 0.0)
     if media_type == "video" and duration > 0:
@@ -1789,6 +2080,13 @@ def process_video_to_job(
         end_time = 0.0
         start_frame = 1
         end_frame = 1
+    elif media_type == "image_sequence":
+        frame_count = max(1, safe_int(info.get("frame_count"), len(source_frame_entries(upload_id))))
+        start_time = 0.0
+        end_time = 0.0
+        keep_every = 1
+        start_frame = clamp_int(int(start_frame or 1), 1, frame_count)
+        end_frame = clamp_int(int(end_frame or frame_count), start_frame, frame_count)
     if media_type == "video" and end_time <= start_time:
         raise ValueError("end time must be greater than start time")
     if media_type == "video":
@@ -1813,6 +2111,10 @@ def process_video_to_job(
         raw_path = raw_dir / "frame_00001.png"
         _, ffmpeg_accel = extract_image_frame(source_path, raw_path)
         raw_paths = [raw_path]
+        source_entries = [{"name": source_path.name}]
+    elif media_type == "image_sequence":
+        raw_paths, source_entries = copy_sequence_frames(upload_id, raw_dir, start_frame, end_frame)
+        ffmpeg_accel = image_sequence_payload()
     else:
         raw_paths, ffmpeg_accel = extract_raw_frames(
             source_path,
@@ -1821,7 +2123,10 @@ def process_video_to_job(
             end_time,
             max(1, keep_every),
         )
+        source_entries = []
     raw_images = [open_rgba_image(path) for path in raw_paths]
+    output_scale = normalize_output_scale(output_scale)
+    target_size = target_size_from_source_height(max(image.height for image in raw_images), output_scale)
 
     keyed_frames, key_rgb, matte_info = apply_matte_pipeline(
         raw_images=raw_images,
@@ -1844,16 +2149,25 @@ def process_video_to_job(
         corridorkey_screen=corridorkey_screen,
     )
 
-    rendered_frames, bboxes, scale, canvas_size = stable_resize_frames(
-        keyed_frames,
-        target_size,
-        reduce_px,
-        canvas_mode,
-        hard_alpha=matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"],
-    )
+    hard_alpha = matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"]
+    if should_preserve_source_canvas(media_type, reduce_px, canvas_mode):
+        rendered_frames, bboxes, scale, canvas_size = resize_frames_on_source_canvas(
+            keyed_frames,
+            output_scale,
+            hard_alpha=hard_alpha,
+        )
+    else:
+        rendered_frames, bboxes, scale, canvas_size = stable_resize_frames(
+            keyed_frames,
+            target_size,
+            reduce_px,
+            canvas_mode,
+            hard_alpha=hard_alpha,
+        )
     frame_entries: list[dict] = []
     postprocess_changed = {
         "green_to_black": 0,
+        "green_desaturate": 0,
         "semitransparent_to_black": 0,
         "semitransparent_to_opaque": 0,
     }
@@ -1865,6 +2179,9 @@ def process_video_to_job(
         if batch_green_to_black:
             frame, changed = green_to_black_image(frame)
             postprocess_changed["green_to_black"] += changed
+        if batch_green_desaturate:
+            frame, changed = green_desaturate_image(frame)
+            postprocess_changed["green_desaturate"] += changed
         if batch_semitransparent_to_black:
             frame, changed = semitransparent_to_black_image(frame)
             postprocess_changed["semitransparent_to_black"] += changed
@@ -1879,6 +2196,7 @@ def process_video_to_job(
             {
                 "index": index,
                 "name": frame_name,
+                "original_name": source_entries[index]["name"] if index < len(source_entries) else frame_name,
                 "url": f"/work/jobs/{job_id}/processed/{frame_name}",
                 "thumb_url": f"/work/jobs/{job_id}/thumbs/{thumb_name}",
                 "bbox": list(bboxes[index]) if bboxes[index] else None,
@@ -1904,8 +2222,10 @@ def process_video_to_job(
             "end_frame": end_frame,
             "keep_every": keep_every,
             "target_size": target_size,
+            "output_scale": output_scale,
             "reduce_px": reduce_px,
             "canvas_mode": normalize_canvas_mode(canvas_mode),
+            "preserve_source_canvas": should_preserve_source_canvas(media_type, reduce_px, canvas_mode),
             "output_width": canvas_size[0],
             "output_height": canvas_size[1],
             "chroma_enabled": chroma_enabled,
@@ -1920,6 +2240,7 @@ def process_video_to_job(
             "corridorkey_enabled": matte_info["corridorkey_enabled"],
             "corridorkey_screen": matte_info["corridorkey_screen_color"],
             "batch_green_to_black": bool(batch_green_to_black),
+            "batch_green_desaturate": bool(batch_green_desaturate),
             "batch_semitransparent_to_black": bool(batch_semitransparent_to_black),
             "batch_semitransparent_to_opaque": bool(batch_semitransparent_to_opaque),
             "postprocess_changed_pixels": postprocess_changed,
@@ -1952,6 +2273,34 @@ def save_preview_manifest(preview_id: str, manifest: dict) -> None:
     (root / "preview.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def is_green_residue_pixel(
+    r_value: int,
+    g_value: int,
+    b_value: int,
+    alpha: int,
+    threshold: int,
+    dominance: int,
+    alpha_floor: int,
+) -> bool:
+    if alpha < alpha_floor:
+        return False
+
+    raw_green_excess = g_value - max(r_value, b_value)
+    is_raw_green = g_value >= threshold and raw_green_excess >= dominance
+    if is_raw_green:
+        return True
+
+    if alpha <= 0:
+        return False
+
+    alpha_scale = 255.0 / alpha
+    scaled_r = min(255, round(r_value * alpha_scale))
+    scaled_g = min(255, round(g_value * alpha_scale))
+    scaled_b = min(255, round(b_value * alpha_scale))
+    scaled_green_excess = scaled_g - max(scaled_r, scaled_b)
+    return scaled_g >= threshold and scaled_green_excess >= dominance
+
+
 def green_to_black_image(
     image: Image.Image,
     threshold: int = 42,
@@ -1966,19 +2315,34 @@ def green_to_black_image(
     alpha_floor = max(0, min(255, int(alpha_floor)))
 
     for r_value, g_value, b_value, alpha in rgba.getdata():
-        raw_green_excess = g_value - max(r_value, b_value)
-        is_raw_green = g_value >= threshold and raw_green_excess >= dominance
-        is_alpha_scaled_green = False
-        if alpha > 0:
-            alpha_scale = 255.0 / alpha
-            scaled_r = min(255, round(r_value * alpha_scale))
-            scaled_g = min(255, round(g_value * alpha_scale))
-            scaled_b = min(255, round(b_value * alpha_scale))
-            scaled_green_excess = scaled_g - max(scaled_r, scaled_b)
-            is_alpha_scaled_green = scaled_g >= threshold and scaled_green_excess >= dominance
-        is_green = alpha >= alpha_floor and (is_raw_green or is_alpha_scaled_green)
-        if is_green:
+        if is_green_residue_pixel(r_value, g_value, b_value, alpha, threshold, dominance, alpha_floor):
             output_pixels.append((0, 0, 0, alpha))
+            changed += 1
+        else:
+            output_pixels.append((r_value, g_value, b_value, alpha))
+
+    cleaned = Image.new("RGBA", rgba.size)
+    cleaned.putdata(output_pixels)
+    return cleaned, changed
+
+
+def green_desaturate_image(
+    image: Image.Image,
+    threshold: int = 42,
+    dominance: int = 24,
+    alpha_floor: int = 1,
+) -> tuple[Image.Image, int]:
+    rgba = image.convert("RGBA")
+    output_pixels: list[tuple[int, int, int, int]] = []
+    changed = 0
+    threshold = max(0, min(255, int(threshold)))
+    dominance = max(0, min(255, int(dominance)))
+    alpha_floor = max(0, min(255, int(alpha_floor)))
+
+    for r_value, g_value, b_value, alpha in rgba.getdata():
+        if is_green_residue_pixel(r_value, g_value, b_value, alpha, threshold, dominance, alpha_floor):
+            gray = clamp_int(round(0.299 * r_value + 0.587 * g_value + 0.114 * b_value), 0, 255)
+            output_pixels.append((gray, gray, gray, alpha))
             changed += 1
         else:
             output_pixels.append((r_value, g_value, b_value, alpha))
@@ -2008,6 +2372,31 @@ def green_to_black_preview(preview_id: str, threshold: int = 42, dominance: int 
     green_black["dominance"] = max(0, min(255, int(dominance)))
     green_black["changed_pixels"] = changed
     green_black["updated_at"] = iso_now()
+    preview["processed_url"] = f"/work/previews/{preview['preview_id']}/processed.png?ts={int(time.time() * 1000)}"
+    save_preview_manifest(preview["preview_id"], preview)
+    return preview
+
+
+def green_desaturate_preview(preview_id: str, threshold: int = 42, dominance: int = 24) -> dict:
+    preview = load_preview_manifest(preview_id)
+    root = preview_dir(preview["preview_id"])
+    processed_path = root / "processed.png"
+    if not processed_path.exists():
+        raise FileNotFoundError(f"processed preview missing: {processed_path}")
+
+    image = open_rgba_image(processed_path)
+    cleaned, changed = green_desaturate_image(image, threshold=threshold, dominance=dominance)
+    image.close()
+    cleaned.save(processed_path)
+    cleaned.close()
+
+    postprocess = preview.setdefault("postprocess", {})
+    green_desaturate = postprocess.setdefault("green_desaturate", {})
+    green_desaturate["enabled"] = True
+    green_desaturate["threshold"] = max(0, min(255, int(threshold)))
+    green_desaturate["dominance"] = max(0, min(255, int(dominance)))
+    green_desaturate["changed_pixels"] = changed
+    green_desaturate["updated_at"] = iso_now()
     preview["processed_url"] = f"/work/previews/{preview['preview_id']}/processed.png?ts={int(time.time() * 1000)}"
     save_preview_manifest(preview["preview_id"], preview)
     return preview
@@ -2112,7 +2501,8 @@ def semitransparent_to_opaque_preview(preview_id: str, alpha_min: int = 1, alpha
 def preview_frame(
     upload_id: str,
     sample_time: float,
-    target_size: int,
+    sample_frame: int,
+    output_scale: float,
     reduce_px: int,
     canvas_mode: str,
     chroma_enabled: bool,
@@ -2125,7 +2515,7 @@ def preview_frame(
     halo_pixels: int,
     ai_model: str,
     ai_device: str,
-    ai_resolution: int,
+    ai_resolution: int | str | None,
     luma_black: int,
     luma_white: int,
     luma_gamma: float,
@@ -2133,28 +2523,43 @@ def preview_frame(
     corridorkey_enabled: bool,
     corridorkey_screen: str,
     batch_green_to_black: bool = False,
+    batch_green_desaturate: bool = False,
     batch_semitransparent_to_black: bool = False,
     batch_semitransparent_to_opaque: bool = False,
 ) -> dict:
     source_path, media_type = source_media_entry(upload_id)
-    info = media_info(source_path, media_type)
+    info = upload_media_info(upload_id, source_path, media_type)
     duration = safe_float(info.get("duration"), 0.0)
     if media_type == "video" and duration > 0:
         sample_time = clamp_float(sample_time, 0.0, duration)
     else:
         sample_time = 0.0
+    selected_source_name = source_path.name
+    selected_sample_frame = 1
 
     preview_id = timestamped_id()
     root = preview_dir(preview_id)
     raw_path = root / "raw.png"
     source_preview_path = root / "source.png"
     processed_path = root / "processed.png"
+    root.mkdir(parents=True, exist_ok=True)
 
     if media_type == "image":
         _, ffmpeg_accel = extract_image_frame(source_path, raw_path)
+    elif media_type == "image_sequence":
+        entries = source_frame_entries(upload_id)
+        selected_index = clamp_int(int(sample_frame or 1), 1, len(entries)) - 1
+        selected_entry = entries[selected_index]
+        selected_source_name = selected_entry["name"]
+        selected_sample_frame = selected_index + 1
+        with Image.open(selected_entry["path"]) as image:
+            image.convert("RGBA").save(raw_path)
+        ffmpeg_accel = image_sequence_payload()
     else:
         _, ffmpeg_accel = extract_single_frame(source_path, raw_path, sample_time)
     raw_image = open_rgba_image(raw_path)
+    output_scale = normalize_output_scale(output_scale)
+    target_size = target_size_from_source_height(raw_image.height, output_scale)
 
     raw_image.save(source_preview_path)
 
@@ -2180,22 +2585,34 @@ def preview_frame(
     )
     keyed_image = keyed_frames[0]
 
-    rendered_frames, _, scale, canvas_size = stable_resize_frames(
-        [keyed_image],
-        target_size,
-        reduce_px,
-        canvas_mode,
-        hard_alpha=matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"],
-    )
+    hard_alpha = matte_info["mode"] == "chroma" and softness == 0 and not matte_info["corridorkey_enabled"]
+    if should_preserve_source_canvas(media_type, reduce_px, canvas_mode):
+        rendered_frames, _, scale, canvas_size = resize_frames_on_source_canvas(
+            [keyed_image],
+            output_scale,
+            hard_alpha=hard_alpha,
+        )
+    else:
+        rendered_frames, _, scale, canvas_size = stable_resize_frames(
+            [keyed_image],
+            target_size,
+            reduce_px,
+            canvas_mode,
+            hard_alpha=hard_alpha,
+        )
     rendered_frame = rendered_frames[0]
     postprocess_changed = {
         "green_to_black": 0,
+        "green_desaturate": 0,
         "semitransparent_to_black": 0,
         "semitransparent_to_opaque": 0,
     }
     if batch_green_to_black:
         rendered_frame, changed = green_to_black_image(rendered_frame)
         postprocess_changed["green_to_black"] += changed
+    if batch_green_desaturate:
+        rendered_frame, changed = green_desaturate_image(rendered_frame)
+        postprocess_changed["green_desaturate"] += changed
     if batch_semitransparent_to_black:
         rendered_frame, changed = semitransparent_to_black_image(rendered_frame)
         postprocess_changed["semitransparent_to_black"] += changed
@@ -2208,6 +2625,8 @@ def preview_frame(
         "preview_id": preview_id,
         "upload_id": upload_id,
         "sample_time": sample_time,
+        "sample_frame": selected_sample_frame,
+        "source_name": selected_source_name,
         "source_path": str(source_path),
         "source_media_type": media_type,
         "source_url": f"/work/previews/{preview_id}/source.png",
@@ -2219,8 +2638,10 @@ def preview_frame(
         "postprocess_changed": postprocess_changed,
         "options": {
             "target_size": target_size,
+            "output_scale": output_scale,
             "reduce_px": reduce_px,
             "canvas_mode": normalize_canvas_mode(canvas_mode),
+            "preserve_source_canvas": should_preserve_source_canvas(media_type, reduce_px, canvas_mode),
             "output_width": canvas_size[0],
             "output_height": canvas_size[1],
             "chroma_enabled": chroma_enabled,
@@ -2233,6 +2654,7 @@ def preview_frame(
             "corridorkey_enabled": matte_info["corridorkey_enabled"],
             "corridorkey_screen": matte_info["corridorkey_screen_color"],
             "batch_green_to_black": bool(batch_green_to_black),
+            "batch_green_desaturate": bool(batch_green_desaturate),
             "batch_semitransparent_to_black": bool(batch_semitransparent_to_black),
             "batch_semitransparent_to_opaque": bool(batch_semitransparent_to_opaque),
             "postprocess_changed_pixels": postprocess_changed,
@@ -2300,6 +2722,7 @@ def save_preview_as_job(preview_id: str) -> dict:
             "end_time": 0,
             "keep_every": 1,
             "target_size": options.get("target_size") or canvas_size[1],
+            "output_scale": options.get("output_scale") or preview.get("output_scale") or 1,
             "reduce_px": options.get("reduce_px") or 0,
             "canvas_mode": normalize_canvas_mode(str(options.get("canvas_mode") or "auto")),
             "output_width": options.get("output_width") or canvas_size[0],
@@ -2744,7 +3167,7 @@ def save_alpha_mov(
         shutil.rmtree(video_frames_dir, ignore_errors=True)
 
 
-def export_job(job_id: str, selected_indices: list[int], sheet_columns: int, video_duration_ms: int) -> dict:
+def export_job(job_id: str, selected_indices: list[int], video_duration_ms: int) -> dict:
     manifest = load_job_manifest(job_id)
     processed_dir = job_dir(job_id) / "processed"
     target_dir = EXPORTS_DIR / f"{timestamped_id()}-export"
@@ -2769,11 +3192,6 @@ def export_job(job_id: str, selected_indices: list[int], sheet_columns: int, vid
         shutil.copy2(source_path, target_path)
         copied_paths.append(target_path)
 
-    zip_path = target_dir / "frames.zip"
-    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-        for frame_path in copied_paths:
-            archive.write(frame_path, arcname=frame_path.name)
-
     cell_width = 0
     cell_height = 0
     frame_sizes: list[tuple[int, int]] = []
@@ -2783,47 +3201,17 @@ def export_job(job_id: str, selected_indices: list[int], sheet_columns: int, vid
         cell_width = max(cell_width, frame.size[0])
         cell_height = max(cell_height, frame.size[1])
         frame.close()
-    columns = max(1, sheet_columns or round(math.sqrt(len(copied_paths))))
-    rows = math.ceil(len(copied_paths) / columns)
-    sheet = Image.new("RGBA", (columns * cell_width, rows * cell_height), (0, 0, 0, 0))
-    for index, frame_path in enumerate(copied_paths):
-        row = index // columns
-        column = index % columns
-        frame = open_rgba_image(frame_path)
-        frame_width, frame_height = frame_sizes[index]
-        offset_x = column * cell_width + (cell_width - frame_width) // 2
-        offset_y = row * cell_height + (cell_height - frame_height) // 2
-        sheet.paste(frame, (offset_x, offset_y), frame)
-        frame.close()
-    sheet_path = target_dir / "sprite_sheet.png"
-    sheet.save(sheet_path)
-    sheet.close()
 
     video_duration_ms = clamp_int(video_duration_ms, 20, 5000)
-    video_path = target_dir / "animation.mov"
+    video_name = f"animation-{datetime.now():%Y%m%d-%H%M%S}.mov"
+    video_path = target_dir / video_name
     save_alpha_mov(copied_paths, frame_sizes, video_path, cell_width, cell_height, video_duration_ms)
 
-    export_manifest = {
-        "job_id": job_id,
-        "selected_indices": indices,
-        "sheet_columns": columns,
-        "cell_width": cell_width,
-        "cell_height": cell_height,
-        "frame_count": len(copied_paths),
-        "frames_dir": str(frames_dir),
-        "zip_path": str(zip_path),
-        "sheet_path": str(sheet_path),
-        "video_path": str(video_path),
-        "video_duration_ms": video_duration_ms,
-    }
-    (target_dir / "export.json").write_text(json.dumps(export_manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     return {
         "output_dir": str(target_dir),
         "frames_dir": str(frames_dir),
-        "zip_url": f"/work/exports/{target_dir.name}/frames.zip",
-        "sheet_url": f"/work/exports/{target_dir.name}/sprite_sheet.png",
-        "video_url": f"/work/exports/{target_dir.name}/animation.mov",
-        "manifest_url": f"/work/exports/{target_dir.name}/export.json",
+        "video_name": video_name,
+        "video_url": f"/work/exports/{target_dir.name}/{video_name}",
         "frame_count": len(copied_paths),
         "video_duration_ms": video_duration_ms,
     }
@@ -2856,6 +3244,9 @@ class AppHandler(BaseHTTPRequestHandler):
                     "poll_ms": APP_VERSION_POLL_MS,
                 }
             )
+            return
+        if parsed.path == "/api/runtime-info":
+            self.send_json({"ok": True, "runtime": runtime_info()})
             return
         if parsed.path == "/":
             self.serve_app_file(APP_DIR / "index.html", content_type="text/html; charset=utf-8")
@@ -2893,10 +3284,10 @@ class AppHandler(BaseHTTPRequestHandler):
                         "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
                     },
                 )
-                file_item = form["video"] if "video" in form else None
-                if file_item is None or not getattr(file_item, "file", None):
+                file_items = field_storage_items(form, "video")
+                if not file_items:
                     raise ValueError("media file missing")
-                result = register_uploaded_file(file_item)
+                result = register_uploaded_media(file_items)
                 self.send_json({"ok": True, "upload": result})
                 return
             if parsed.path == "/api/import-animation":
@@ -2934,15 +3325,16 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/process":
                 payload = self.read_json_body()
+                upload_id = str(payload.get("upload_id") or "")
                 result = process_video_to_job(
-                    upload_id=str(payload.get("upload_id") or ""),
+                    upload_id=upload_id,
                     start_time=safe_float(payload.get("start_time"), 0.0),
                     end_time=safe_float(payload.get("end_time"), 0.0),
                     start_frame=safe_int(payload.get("start_frame"), 0),
                     end_frame=safe_int(payload.get("end_frame"), 0),
                     keep_every=max(1, safe_int(payload.get("keep_every"), 1)),
-                    target_size=max(32, safe_int(payload.get("target_size"), 256)),
-                    reduce_px=max(0, safe_int(payload.get("reduce_px"), 20)),
+                    output_scale=output_scale_from_upload_payload(upload_id, payload),
+                    reduce_px=max(0, safe_int(payload.get("reduce_px"), 0)),
                     canvas_mode=normalize_canvas_mode(str(payload.get("canvas_mode") or "auto")),
                     chroma_enabled=bool(payload.get("chroma_enabled", True)),
                     matte_mode=str(payload.get("matte_mode") or ""),
@@ -2954,7 +3346,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     halo_pixels=max(0, safe_int(payload.get("halo_pixels"), 1)),
                     ai_model=normalize_ai_model_key(str(payload.get("ai_model") or DEFAULT_AI_MATTE_MODEL)),
                     ai_device=normalize_ai_device(str(payload.get("ai_device") or "auto")),
-                    ai_resolution=normalize_ai_resolution(payload.get("ai_resolution")),
+                    ai_resolution=payload.get("ai_resolution"),
                     luma_black=max(0, min(254, safe_int(payload.get("luma_black"), 24))),
                     luma_white=max(1, min(255, safe_int(payload.get("luma_white"), 230))),
                     luma_gamma=max(0.05, safe_float(payload.get("luma_gamma"), 1.0)),
@@ -2962,6 +3354,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     corridorkey_enabled=bool(payload.get("corridorkey_enabled", False)),
                     corridorkey_screen=normalize_corridorkey_screen(str(payload.get("corridorkey_screen") or "auto")),
                     batch_green_to_black=bool(payload.get("batch_green_to_black", False)),
+                    batch_green_desaturate=bool(payload.get("batch_green_desaturate", False)),
                     batch_semitransparent_to_black=bool(payload.get("batch_semitransparent_to_black", False)),
                     batch_semitransparent_to_opaque=bool(payload.get("batch_semitransparent_to_opaque", False)),
                 )
@@ -2969,11 +3362,13 @@ class AppHandler(BaseHTTPRequestHandler):
                 return
             if parsed.path == "/api/preview-frame":
                 payload = self.read_json_body()
+                upload_id = str(payload.get("upload_id") or "")
                 result = preview_frame(
-                    upload_id=str(payload.get("upload_id") or ""),
+                    upload_id=upload_id,
                     sample_time=safe_float(payload.get("sample_time"), 0.0),
-                    target_size=max(32, safe_int(payload.get("target_size"), 256)),
-                    reduce_px=max(0, safe_int(payload.get("reduce_px"), 20)),
+                    sample_frame=safe_int(payload.get("sample_frame"), 1),
+                    output_scale=output_scale_from_upload_payload(upload_id, payload),
+                    reduce_px=max(0, safe_int(payload.get("reduce_px"), 0)),
                     canvas_mode=normalize_canvas_mode(str(payload.get("canvas_mode") or "auto")),
                     chroma_enabled=bool(payload.get("chroma_enabled", True)),
                     matte_mode=str(payload.get("matte_mode") or ""),
@@ -2985,7 +3380,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     halo_pixels=max(0, safe_int(payload.get("halo_pixels"), 1)),
                     ai_model=normalize_ai_model_key(str(payload.get("ai_model") or DEFAULT_AI_MATTE_MODEL)),
                     ai_device=normalize_ai_device(str(payload.get("ai_device") or "auto")),
-                    ai_resolution=normalize_ai_resolution(payload.get("ai_resolution")),
+                    ai_resolution=payload.get("ai_resolution"),
                     luma_black=max(0, min(254, safe_int(payload.get("luma_black"), 24))),
                     luma_white=max(1, min(255, safe_int(payload.get("luma_white"), 230))),
                     luma_gamma=max(0.05, safe_float(payload.get("luma_gamma"), 1.0)),
@@ -2993,6 +3388,7 @@ class AppHandler(BaseHTTPRequestHandler):
                     corridorkey_enabled=bool(payload.get("corridorkey_enabled", False)),
                     corridorkey_screen=normalize_corridorkey_screen(str(payload.get("corridorkey_screen") or "auto")),
                     batch_green_to_black=bool(payload.get("batch_green_to_black", False)),
+                    batch_green_desaturate=bool(payload.get("batch_green_desaturate", False)),
                     batch_semitransparent_to_black=bool(payload.get("batch_semitransparent_to_black", False)),
                     batch_semitransparent_to_opaque=bool(payload.get("batch_semitransparent_to_opaque", False)),
                 )
@@ -3006,6 +3402,15 @@ class AppHandler(BaseHTTPRequestHandler):
             if parsed.path == "/api/preview-green-to-black":
                 payload = self.read_json_body()
                 result = green_to_black_preview(
+                    str(payload.get("preview_id") or ""),
+                    threshold=max(0, min(255, safe_int(payload.get("threshold"), 42))),
+                    dominance=max(0, min(255, safe_int(payload.get("dominance"), 24))),
+                )
+                self.send_json({"ok": True, "preview": result})
+                return
+            if parsed.path == "/api/preview-green-desaturate":
+                payload = self.read_json_body()
+                result = green_desaturate_preview(
                     str(payload.get("preview_id") or ""),
                     threshold=max(0, min(255, safe_int(payload.get("threshold"), 42))),
                     dominance=max(0, min(255, safe_int(payload.get("dominance"), 24))),
@@ -3035,7 +3440,6 @@ class AppHandler(BaseHTTPRequestHandler):
                 result = export_job(
                     job_id=str(payload.get("job_id") or ""),
                     selected_indices=[safe_int(value, -1) for value in (payload.get("selected_indices") or [])],
-                    sheet_columns=max(1, safe_int(payload.get("sheet_columns"), 4)),
                     video_duration_ms=safe_int(payload.get("video_duration_ms"), 100),
                 )
                 self.send_json({"ok": True, "export": result})
@@ -3066,7 +3470,7 @@ class AppHandler(BaseHTTPRequestHandler):
         if not is_within_root(path, APP_DIR):
             self.send_error(HTTPStatus.FORBIDDEN)
             return
-        self.serve_file(path, content_type=content_type, allow_range=allow_range)
+        self.serve_file(path, content_type=content_type, allow_range=allow_range, cache_control="no-store")
 
     def serve_work_file(self, path: Path, content_type: str | None = None, allow_range: bool = False) -> None:
         if not is_within_root(path, WORK_DIR):
@@ -3077,7 +3481,13 @@ class AppHandler(BaseHTTPRequestHandler):
     def serve_media_file(self, path: Path, content_type: str | None = None, allow_range: bool = False) -> None:
         self.serve_file(path, content_type=content_type, allow_range=allow_range)
 
-    def serve_file(self, path: Path, content_type: str | None = None, allow_range: bool = False) -> None:
+    def serve_file(
+        self,
+        path: Path,
+        content_type: str | None = None,
+        allow_range: bool = False,
+        cache_control: str | None = None,
+    ) -> None:
         path = path.resolve()
         if not path.exists() or not path.is_file():
             self.send_error(HTTPStatus.NOT_FOUND)
@@ -3098,6 +3508,8 @@ class AppHandler(BaseHTTPRequestHandler):
             length = (end - start) + 1
             self.send_response(HTTPStatus.PARTIAL_CONTENT)
             self.send_header("Content-Type", guessed_type)
+            if cache_control:
+                self.send_header("Cache-Control", cache_control)
             self.send_header("Accept-Ranges", "bytes")
             self.send_header("Content-Range", f"bytes {start}-{end}/{file_size}")
             self.send_header("Content-Length", str(length))
@@ -3109,6 +3521,8 @@ class AppHandler(BaseHTTPRequestHandler):
 
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", guessed_type)
+        if cache_control:
+            self.send_header("Cache-Control", cache_control)
         self.send_header("Content-Length", str(file_size))
         if allow_range:
             self.send_header("Accept-Ranges", "bytes")
