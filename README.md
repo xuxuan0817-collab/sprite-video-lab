@@ -1,5 +1,11 @@
 # Sprite Video Lab
 
+[![CI](https://github.com/xuxuan0817-collab/sprite-video-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/xuxuan0817-collab/sprite-video-lab/actions/workflows/ci.yml)
+[![Project site](https://img.shields.io/badge/GitHub%20Pages-在线介绍-8b7cff)](https://xuxuan0817-collab.github.io/sprite-video-lab/)
+[![Latest release](https://img.shields.io/github/v/release/xuxuan0817-collab/sprite-video-lab?label=Windows%20下载)](https://github.com/xuxuan0817-collab/sprite-video-lab/releases/latest)
+
+> GitHub Pages 提供项目介绍与下载入口。视频处理、AI 抠图和文件导出均在 Windows 本机运行，不会把素材上传到 Pages。
+
 Sprite Video Lab 是一个本地网页工具，用来把视频片段、单张图片或已有序列帧整理成干净的 2D Sprite 资源。
 
 它适合这些工作流：

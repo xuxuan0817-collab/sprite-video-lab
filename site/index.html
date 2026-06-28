@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Sprite Video Lab：把视频、图片和动画序列整理成干净的 2D Sprite 资源。">
+    <title>Sprite Video Lab</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main>
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">LOCAL SPRITE WORKFLOW</p>
+          <h1>Sprite Video Lab</h1>
+          <p class="lead">把视频片段、图片或序列帧，整理成透明、统一、可直接进入游戏引擎的 2D Sprite 资源。</p>
+          <div class="actions">
+            <a class="button primary" href="https://github.com/xuxuan0817-collab/sprite-video-lab/releases/latest">下载 Windows 版本</a>
+            <a class="button secondary" href="https://github.com/xuxuan0817-collab/sprite-video-lab">查看源代码</a>
+          </div>
+          <p class="note">核心处理在本机完成，素材不会上传到网页服务器。</p>
+        </div>
+        <img class="app-icon" src="sprite-video-lab-icon.png" alt="Sprite Video Lab 图标">
+      </section>
+
+      <section class="features" aria-label="主要功能">
+        <article><span>01</span><h2>导入与抽帧</h2><p>支持视频、GIF、图片和已有序列帧，可截取区间并按固定间隔抽帧。</p></article>
+        <article><span>02</span><h2>透明背景</h2><p>提供纯色、绿幕/蓝幕、BiRefNet AI、Luma 与 CorridorKey 等处理方式。</p></article>
+        <article><span>03</span><h2>整理与导出</h2><p>统一画布与帧尺寸，导出 PNG 帧、Sprite Sheet、动画和项目数据。</p></article>
+      </section>
+
+      <section class="preview">
+        <div class="section-heading">
+          <p class="eyebrow">WORKBENCH</p>
+          <h2>一个工作台，走完整条素材流水线</h2>
+        </div>
+        <img src="svl-full-page.png" alt="Sprite Video Lab 完整界面预览">
+      </section>
+
+      <section class="requirements">
+        <div><p class="eyebrow">RUNS LOCALLY</p><h2>面向 Windows 本地工作流</h2></div>
+        <p>基础运行需要 Python、Pillow 和 ffmpeg；AI 抠图功能会按需安装 PyTorch、BiRefNet 等可选依赖。详细步骤与故障排查均已写入仓库文档。</p>
+      </section>
+    </main>
+    <footer>MIT Licensed · Sprite Video Lab</footer>
+  </body>
+</html>
