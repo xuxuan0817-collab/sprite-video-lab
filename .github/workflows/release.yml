@@ -1,0 +1,41 @@
+name: Build Windows download
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package project
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -Raw).Trim()
+          $bundle = "dist/SpriteVideoLab-Windows-v$version"
+          New-Item -ItemType Directory -Path $bundle -Force | Out-Null
+          $items = @(
+            "app", "server.py", "start_sprite_video_lab.bat",
+            "setup_ai_runtime.bat", "requirements.txt", "requirements-ai.txt",
+            "README.md", "USAGE.md", "USAGE.zh-CN.md", "AI_MATTING.md",
+            "AGENT_INSTALL.md", "LICENSE", "VERSION",
+            "sprite_video_lab_icon.png", "sprite_video_lab_icon.ico"
+          )
+          Copy-Item $items -Destination $bundle -Recurse -Force
+          Compress-Archive -Path $bundle -DestinationPath "$bundle.zip" -CompressionLevel Optimal
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpriteVideoLab-Windows
+          path: dist/*.zip
+      - name: Publish GitHub release
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create $env:GITHUB_REF_NAME dist/*.zip --generate-notes --title "Sprite Video Lab $env:GITHUB_REF_NAME"
