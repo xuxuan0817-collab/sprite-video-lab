@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 - 2026-06-28
+
+### Deployment
+- Add automated tests for Python 3.10 and 3.12.
+- Add a GitHub Pages project site with repository and Windows download links.
+- Add automated Windows ZIP packaging and GitHub Release publishing.
+
 ## 0.2.0 - 2026-06-07
 
 ### Features
